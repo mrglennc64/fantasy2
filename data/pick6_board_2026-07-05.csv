@@ -1,0 +1,13 @@
+date,pitcher,team,game,market,line,more_available,less_available,more_boost,notes
+2026-07-05,Joe Ryan,MIN,MIN@NYY,strikeouts,6.5,True,True,1.0,
+2026-07-05,Kyle Bradish,BAL,BAL@CIN,strikeouts,6.5,True,False,1.1,More boosted 1.1x (Less not offered)
+2026-07-05,Nolan McLean,NYM,NYM@ATL,strikeouts,6.5,True,False,1.1,More boosted 1.1x
+2026-07-05,Trey Yesavage,TOR,TOR@SEA,strikeouts,5.5,True,False,0.9,More demoted 0.9x (DK leans More likely)
+2026-07-05,Aaron Nola,PHI,PHI@KC,strikeouts,5.5,True,False,1.0,More only
+2026-07-05,Ryan Weathers,MIN,MIN@NYY,strikeouts,5.5,True,True,1.0,
+2026-07-05,Nick Lodolo,CIN,BAL@CIN,strikeouts,5.5,True,True,1.0,
+2026-07-05,Casey Mize,DET,DET@TEX,strikeouts,5.5,True,False,1.1,More boosted 1.1x
+2026-07-05,Kumar Rocker,TEX,DET@TEX,strikeouts,4.5,True,True,1.0,
+2026-07-05,Emerson Hancock,SEA,TOR@SEA,strikeouts,4.5,True,True,1.0,
+2026-07-05,Martin Perez,NYM,NYM@ATL,strikeouts,4.5,True,True,1.0,
+2026-07-05,Luinder Avila,PHI,PHI@KC,strikeouts,4.5,True,True,1.0,
