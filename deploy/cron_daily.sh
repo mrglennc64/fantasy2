@@ -26,8 +26,7 @@ echo "=== $(date -u) daily run for $DATE ==="
 "$PY" web/build_site.py "$DATE" "$REPO/web/dist/index.html"
 
 install -o www-data -g www-data -m 644 "$REPO/web/dist/index.html" "$WWW/index.html"
-# persist newly graded results back to the repo so the record survives
-git add data/pick6_entries.csv 2>/dev/null || true
-git -c user.name=fantasy-cron -c user.email=cron@perfecthold.online \
-    commit -q -m "cron: grade+log $DATE" 2>/dev/null && git push --quiet || echo "nothing to commit"
+# data/pick6_entries.csv is gitignored (VPS-owned runtime state) so daily writes
+# never fight `git pull`. Keep a dated backup instead of committing it.
+cp -f "$REPO/data/pick6_entries.csv" "$REPO/data/pick6_entries.$(date +%Y%m%d).bak" 2>/dev/null || true
 echo "=== published https://fantasy.perfecthold.online ==="
