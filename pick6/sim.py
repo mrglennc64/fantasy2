@@ -60,10 +60,19 @@ def score_leg(leg: dict) -> dict:
 
 # ---- step 2: keep confident legs --------------------------------------------
 
+def _side_available(leg: dict) -> bool:
+    """DK sometimes offers only More (or only Less) on a leg. If availability
+    flags are present, the chosen side must actually be offered."""
+    if leg["side"] == "more":
+        return leg.get("more_available", True)
+    return leg.get("less_available", True)
+
+
 def rank_legs(legs: list[dict], n_picks: int, margin: float = 0.05) -> list[dict]:
-    """Keep legs whose model prob clears the n-pick breakeven by `margin`."""
+    """Keep legs whose model prob clears the n-pick breakeven by `margin` AND
+    whose model-chosen side is actually offered on the board."""
     be = breakeven_per_leg(n_picks)
-    scored = [score_leg(l) for l in legs]
+    scored = [score_leg(l) for l in legs if _side_available(score_leg(l))]
     keep = [l for l in scored if l["p"] >= be + margin]
     return sorted(keep, key=lambda l: l["p"], reverse=True)
 

@@ -54,10 +54,14 @@ DK's line is wildly off and are rare in practice. Re-fit `r` as settled n grows
 
 ```
 pick6/config.py        multiplier table + breakeven + entry-EV math
-pick6/sim.py           leg scoring (Poisson P(More/Less)), entry builder, exact outcome matrix
-pick6/pick6_today.py   join live mlb-edge λ to the DK board, score & build entries
-calibration/backtest.py  reliability test of P(side) vs realized (run this first)
-data/pick6_board_*.csv   captured DK Pick6 boards (line + per-leg boosts)
+pick6/dispersion.py    fitted NB dispersion r (from calibration)
+pick6/sim.py           leg scoring (NB P(More/Less)), availability + same-game guards, entry builder, outcome matrix
+pick6/feed.py          full-slate λ feed (/v2/slate rows + /v2/predict fallback, accent-folded names)
+pick6/pick6_today.py   join λ to the DK board, score whole board, step down 3->2 picks, build entries
+calibration/nb.py      NB pmf + MLE fit of the dispersion
+calibration/compare.py Poisson vs NB reliability head-to-head
+calibration/backtest.py  Poisson baseline reliability (kept for reference)
+data/pick6_board_*.csv   captured DK Pick6 boards (line + per-leg boosts + More/Less availability)
 ```
 
 Run:
@@ -86,10 +90,12 @@ that better — but they supply the ingestion layer:
 - **Phase 0 (done):** multiplier/breakeven math, entry builder, outcome matrix.
 - **Phase 2 (done):** NegBinomial `p_more` fitted on settled data; mean |gap|
   3.2 → 1.6 pts. Re-fit r as the sample grows.
-- **Phase 1 (next):** the live slate API only returns today's pre-selected card,
-  so the picker matches ~3 of 12 board pitchers. Need λ for ALL probable
-  starters — add a StatsAPI `hydrate=probablePitcher` feed (lbenz730 pattern) +
-  automate DK board capture (currently manual from screenshot).
+- **Phase 1 (done):** `/v2/slate` actually returns ~30 `rows` (whole slate), not
+  just the 4-leg card — `feed.py` reads those (accent-folded name match, per-
+  pitcher `/v2/predict` fallback) so the picker scores all 12 board pitchers.
+  Also fixed two real bugs: enforce DK More/Less availability (was recommending
+  unofferable sides) and step 3→2 picks when the board is thin. Still manual:
+  DK board capture from screenshot — automate next.
 - **Phase 3:** cross-check every leg against a second projection (RotoWire
   Props-vs-Projections); only play legs where both agree on the same side.
 - **Phase 4:** entry construction (short 2–3 pick sets, correlation, contrarian

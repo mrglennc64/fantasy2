@@ -13,20 +13,14 @@ backtest (calibration/backtest.py) before trusting any breakeven. ***
 from __future__ import annotations
 
 import csv
-import json
 import sys
-import urllib.request
 
-from config import breakeven_per_leg
+from config import MIN_PICKS, breakeven_per_leg
+from feed import lambdas_for
 from sim import allocate, build_entries, outcome_matrix, rank_legs
 
-SLATE = "https://strike.perfecthold.online/api/v2/slate"
 BANKROLL, N_PICKS, MAX_ENTRIES = 1000.0, 3, 4
 DAILY_FRAC, KELLY_FRAC, PER_CAP, MARGIN = 0.05, 0.25, 0.02, 0.05
-
-
-def norm(name: str) -> str:
-    return "".join(c for c in name.lower() if c.isalpha() or c == " ").strip()
 
 
 def load_board(date: str) -> list[dict]:
@@ -34,7 +28,7 @@ def load_board(date: str) -> list[dict]:
     rows = []
     for r in csv.DictReader(open(path, encoding="utf-8")):
         rows.append({
-            "name": r["pitcher"], "game": r["game"], "line": float(r["line"]),
+            "pitcher": r["pitcher"], "game": r["game"], "line": float(r["line"]),
             "more_boost": float(r["more_boost"]),
             "more_available": r["more_available"] == "True",
             "less_available": r["less_available"] == "True",
@@ -42,37 +36,25 @@ def load_board(date: str) -> list[dict]:
     return rows
 
 
-def load_model_lambdas() -> dict[str, float]:
-    """Pitcher -> projected strikeouts (lambda) from the live slate."""
-    d = json.load(urllib.request.urlopen(SLATE, timeout=60))
-    lam = {}
-    for r in d.get("card", []) or []:
-        exp = r.get("expected_ks")
-        if exp is not None:
-            lam[norm(r["pitcher"])] = float(exp)
-    # some builds also expose a full projections list; merge if present
-    for r in d.get("projections", []) or []:
-        exp = r.get("expected_ks")
-        if exp is not None:
-            lam.setdefault(norm(r["pitcher"]), float(exp))
-    return lam
-
-
 def main() -> None:
     date = sys.argv[1] if len(sys.argv) > 1 else "2026-07-05"
     board = load_board(date)
-    lam = load_model_lambdas()
+    lam = lambdas_for(board, date)  # full-slate feed + per-pitcher fallback
 
-    legs = []
+    legs, unmatched = [], []
     for b in board:
-        L = lam.get(norm(b["name"]))
+        L = lam.get(b["pitcher"])
         if L is None:
-            continue  # model has no projection for this pitcher today
-        legs.append({"name": b["name"], "game": b["game"], "line": b["line"],
-                     "lam": L, "more_boost": b["more_boost"]})
+            unmatched.append(b["pitcher"])
+            continue
+        legs.append({"name": b["pitcher"], "game": b["game"], "line": b["line"],
+                     "lam": L, "more_boost": b["more_boost"],
+                     "more_available": b["more_available"],
+                     "less_available": b["less_available"]})
 
     print(f"DK Pick6 strikeouts  {date}   board {len(board)} legs, "
-          f"model matched {len(legs)}")
+          f"model matched {len(legs)}"
+          + (f"  (unmatched: {', '.join(unmatched)})" if unmatched else ""))
     if not legs:
         print("No model<->board matches (is the slate live / names aligned?).")
         return
@@ -86,14 +68,26 @@ def main() -> None:
         print(f"  {l['name']:16}{l['line']:7.1f}{l['lam']:8.2f}"
               f"{l['side'].upper():>7}{l['p']*100:7.1f}%{kept:>6}")
 
-    if len(ranked) < N_PICKS:
-        print(f"\nOnly {len(ranked)} legs clear breakeven+margin — need {N_PICKS}. Stop.")
+    # Step down from N_PICKS to MIN_PICKS until a valid entry set exists
+    # (legs must clear breakeven for that pick count AND span distinct games).
+    n = N_PICKS
+    entries: list = []
+    while n >= MIN_PICKS:
+        cand = rank_legs(legs, n, MARGIN)
+        entries = build_entries(cand, n, MAX_ENTRIES) if len(cand) >= n else []
+        if entries:
+            break
+        n -= 1
+    if not entries:
+        print(f"\nNo playable entry: fewer than {MIN_PICKS} independent legs clear "
+              "breakeven+margin across distinct games today. Stop.")
         return
+    if n < N_PICKS:
+        print(f"\n(Only enough edge for a {n}-pick — stepped down from {N_PICKS}.)")
 
-    entries = build_entries(ranked, N_PICKS, MAX_ENTRIES)
     entries, daily_cap, scale = allocate(entries, BANKROLL, DAILY_FRAC, KELLY_FRAC, PER_CAP)
 
-    print(f"\nPOWER-PLAY ENTRIES  ({N_PICKS}-pick, <= {MAX_ENTRIES}/day, "
+    print(f"\nPOWER-PLAY ENTRIES  ({n}-pick, <= {MAX_ENTRIES}/day, "
           f"daily cap ${daily_cap:.0f}{', scaled '+format(scale,'.2f')+'x' if scale<1 else ''})")
     print(f"  {'#':>2} {'legs':40}{'P(win)':>8}{'mult':>7}{'EV':>7}{'stake':>8}")
     for i, e in enumerate(entries, 1):
