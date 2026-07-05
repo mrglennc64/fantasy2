@@ -71,10 +71,11 @@ def _side_available(leg: dict) -> bool:
     return leg.get("less_available", True)
 
 
-def rank_legs(legs: list[dict], n_picks: int, margin: float = 0.05) -> list[dict]:
-    """Keep legs whose model prob clears the n-pick breakeven by `margin` AND
-    whose model-chosen side is actually offered on the board."""
-    be = breakeven_per_leg(n_picks)
+def rank_legs(legs: list[dict], n_picks: int, margin: float = 0.05,
+              platform: str = "dk_pick6") -> list[dict]:
+    """Keep legs whose model prob clears the n-pick breakeven (for this platform)
+    by `margin` AND whose model-chosen side is actually offered on the board."""
+    be = breakeven_per_leg(n_picks, platform=platform)
     scored = [score_leg(l) for l in legs if _side_available(score_leg(l))]
     keep = [l for l in scored if l["p"] >= be + margin]
     return sorted(keep, key=lambda l: l["p"], reverse=True)
@@ -82,17 +83,19 @@ def rank_legs(legs: list[dict], n_picks: int, margin: float = 0.05) -> list[dict
 
 # ---- step 3/4: build + size entries -----------------------------------------
 
-def build_entries(legs: list[dict], n_picks: int, max_entries: int) -> list[dict]:
+def build_entries(legs: list[dict], n_picks: int, max_entries: int,
+                  platform: str = "dk_pick6") -> list[dict]:
     entries = []
     for combo in combinations(legs, n_picks):
         if len({l["game"] for l in combo}) < n_picks:
-            continue  # never two pitchers from the same game in one entry
+            continue  # never two picks from the same game in one entry
         boosts = [l["boost"] for l in combo]
         probs = [l["p"] for l in combo]
-        m = entry_multiplier(n_picks, boosts)
+        m = entry_multiplier(n_picks, boosts, platform)
         p_all = math.prod(probs)
-        entries.append({"legs": combo, "p": p_all, "mult": m,
-                        "ev": entry_ev(probs, boosts), "kelly": _kelly(p_all, m)})
+        entries.append({"legs": combo, "p": p_all, "mult": m, "n": n_picks,
+                        "platform": platform, "ev": entry_ev(probs, boosts, platform),
+                        "kelly": _kelly(p_all, m)})
     entries.sort(key=lambda e: e["ev"], reverse=True)
     return entries[:max_entries]
 

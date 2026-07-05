@@ -15,7 +15,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "pick6"))
-from pick6_today import compute_entries  # noqa: E402
+from pick6_today import PLATFORM_ABBR, compute_entries  # noqa: E402
 from markets import market_side  # noqa: E402
 
 MKT_ABBR = {"strikeouts": "K", "hits": "H", "total_bases": "TB",
@@ -80,7 +80,9 @@ def render(date, res, tr):
             names += " <span class=pill>same-side</span>"
         ev = e.get("corr_ev", e["ev"]); pw = e.get("corr_p", e["p"])
         cls = "pos" if ev > 0 else "neg"
-        entry_rows += (f"<tr><td>{i}</td><td>{names}</td>"
+        app = PLATFORM_ABBR.get(e.get("platform", ""), e.get("platform", ""))
+        entry_rows += (f"<tr><td>{i}</td><td><span class=pill>{app}</span> "
+                       f"<span class=pill>{e.get('n','')}-pick</span> {names}</td>"
                        f"<td class='n'>{pw*100:.1f}%</td><td class='n'>{e['mult']:.1f}×</td>"
                        f"<td class='n {cls}'>{ev*100:+.0f}%</td><td class='n'>${e['stake']:.2f}</td></tr>")
     if not entry_rows:

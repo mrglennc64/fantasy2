@@ -16,7 +16,7 @@ import sys
 from pick6_today import compute_entries
 
 LOG = os.path.join(os.path.dirname(__file__), "..", "data", "pick6_entries.csv")
-FIELDS = ["date", "entry_id", "n_picks", "mult", "stake", "leg_idx",
+FIELDS = ["date", "entry_id", "platform", "n_picks", "mult", "stake", "leg_idx",
           "pitcher", "game", "market", "side", "line", "lam", "model_p", "boost",
           "rw_proj", "rw_agree", "actual_ks", "leg_won"]
 
@@ -46,7 +46,8 @@ def main() -> None:
         for j, l in enumerate(e["legs"]):
             rw = l.get("rw_proj")
             rows.append({
-                "date": date, "entry_id": eid, "n_picks": res["n_picks"],
+                "date": date, "entry_id": eid, "platform": e.get("platform", ""),
+                "n_picks": e["n"],
                 "mult": f"{e['mult']:.3f}", "stake": f"{e['stake']:.2f}",
                 "leg_idx": j, "pitcher": l["name"], "game": l["game"],
                 "market": l.get("market", "strikeouts"),

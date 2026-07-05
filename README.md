@@ -1,8 +1,12 @@
-# Fantasy — DraftKings Pick6 pitcher-strikeout edge
+# Fantasy — multi-platform pick'em edge (MLB)
 
-Tailors the existing **strike / mlb-edge** strikeout model to **DraftKings Pick6**
-(pick'em: DK sets one projection line per pitcher, you choose More/Less; a
-*power play* pays a fixed multiplier only if **every** leg hits).
+Tailors the **strike / mlb-edge** projections to **pick'em fantasy** props across
+platforms — **PrizePicks, Underdog, DraftKings Pick6, Sleeper, Betr, ParlayPlay**
+(each sets its own projection line; you pick More/Less; a *power play* pays a
+fixed multiplier only if **every** leg hits). The projection is platform-agnostic;
+only the LINE and the PAYOUT table differ, so the picker **line-shops** every leg
+to the best-paying app and builds the best **2 / 3 / 4 / 5-pick** at each size.
+Markets: pitcher strikeouts (calibrated) + batter hits/TB/HR/RBI/runs (baseline).
 
 > **PAPER ONLY — NOT betting advice.** The single-leg K model over-projects and
 > is not yet calibrated (see below). Everything here is machinery + measurement,

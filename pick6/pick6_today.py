@@ -16,16 +16,21 @@ import csv
 import os
 import sys
 
+from collections import Counter
+
 from batter_feed import project as batter_project
-from config import MIN_PICKS, breakeven_per_leg
+from config import DEFAULT_PLATFORM, ENTRY_SIZES, breakeven_per_leg
 from correlation import corr_outcome_matrix, joint_p_all, same_side
 from crosscheck import annotate, gate
 from feed import lambdas_for
 from sim import allocate, build_entries, outcome_matrix, rank_legs, score_leg
 
-BANKROLL, N_PICKS, MAX_ENTRIES = 1000.0, 3, 4
+BANKROLL, MAX_ENTRIES, PER_PS = 1000.0, 6, 3   # PER_PS: entries kept per platform×size
+MAX_PER_PLAYER = 2                              # cluster cap: max entries anchored on one player
 DAILY_FRAC, KELLY_FRAC, PER_CAP, MARGIN = 0.05, 0.25, 0.02, 0.05
 REQUIRE_AGREE = True  # Phase 3: drop legs RotoWire disagrees with
+PLATFORM_ABBR = {"dk_pick6": "DK", "prizepicks": "PP", "underdog": "UD",
+                 "sleeper": "SL", "betr": "BR", "parlayplay": "Pr"}
 
 
 DATA = os.path.join(os.path.dirname(__file__), "..", "data")
@@ -49,6 +54,7 @@ def _read_board_file(path: str) -> list[dict]:
             "name": (r.get("player") or r.get("pitcher") or "").strip(),
             "game": r["game"], "line": float(r["line"]),
             "market": r.get("market", "strikeouts"),
+            "platform": (r.get("platform") or DEFAULT_PLATFORM).strip(),
             "slot": int(r["slot"]) if r.get("slot") else None,
             "more_boost": float(r["more_boost"]),
             "more_available": r["more_available"] == "True",
@@ -92,7 +98,8 @@ def compute_entries(date: str) -> dict:
             unmatched.append(b["name"])
             continue
         legs.append({"name": b["name"], "game": b["game"], "line": b["line"],
-                     "market": b["market"], "lam": L, "more_boost": b["more_boost"],
+                     "market": b["market"], "platform": b["platform"], "lam": L,
+                     "more_boost": b["more_boost"],
                      "more_available": b["more_available"],
                      "less_available": b["less_available"]})
 
@@ -103,50 +110,61 @@ def compute_entries(date: str) -> dict:
     annotate(legs)
     gated = gate(legs, REQUIRE_AGREE)
 
-    # Step down from N_PICKS to MIN_PICKS until a valid entry set exists.
-    n, entries = N_PICKS, []
-    while n >= MIN_PICKS:
-        cand = rank_legs(gated, n, MARGIN)
-        entries = build_entries(cand, n, MAX_ENTRIES) if len(cand) >= n else []
-        if entries:
-            break
-        n -= 1
-    # Phase 4: correlation-adjust each entry (shared day-factor), re-rank by the
-    # corrected EV, and size stakes off the corrected win probability.
-    for e in entries:
+    # Build entries for every PLATFORM x SIZE (2..5): each entry lives on one
+    # platform (can't mix apps), sized 2-5. Legs are line-shopped implicitly —
+    # a softer line on any platform scores higher and surfaces.
+    raw = []
+    for plat in sorted({l["platform"] for l in gated}):
+        plegs = [l for l in gated if l["platform"] == plat]
+        for n in ENTRY_SIZES:
+            cand = rank_legs(plegs, n, MARGIN, plat)
+            if len(cand) >= n:
+                raw += build_entries(cand, n, PER_PS, plat)
+
+    # Phase 4: correlation-adjust, then rank by corrected EV.
+    for e in raw:
         e["corr_p"] = joint_p_all(e["legs"])
         e["corr_ev"] = e["corr_p"] * e["mult"] - 1.0
         e["same_side"] = same_side(e["legs"])
         b = e["mult"] - 1.0
         e["kelly"] = max(0.0, (e["corr_p"] * b - (1 - e["corr_p"])) / b)
-    entries.sort(key=lambda e: e["corr_ev"], reverse=True)
+    raw.sort(key=lambda e: e["corr_ev"], reverse=True)
+
+    # Present the BEST entry at each size 2..5 (line-shopped to the best-paying
+    # platform for that size), so the user gets a pick-2 / pick-3 / pick-4 /
+    # pick-5 rather than everything collapsing to the max-EV 5-pick.
+    best_by_size = {}
+    for e in raw:
+        if e["corr_ev"] <= 0:
+            continue
+        best_by_size.setdefault(e["n"], e)  # raw is EV-sorted -> first is best
+    entries = [best_by_size[k] for k in sorted(best_by_size)]
 
     daily_cap = scale = None
     if entries:
         entries, daily_cap, scale = allocate(
             entries, BANKROLL, DAILY_FRAC, KELLY_FRAC, PER_CAP)
     return {"date": date, "board": board, "legs": legs, "unmatched": unmatched,
-            "entries": entries, "n_picks": n, "daily_cap": daily_cap, "scale": scale}
+            "entries": entries, "daily_cap": daily_cap, "scale": scale}
 
 
 def main() -> None:
     date = sys.argv[1] if len(sys.argv) > 1 else "2026-07-05"
     res = compute_entries(date)
-    legs, entries, n = res["legs"], res["entries"], res["n_picks"]
+    legs, entries = res["legs"], res["entries"]
     board, unmatched = res["board"], res["unmatched"]
+    platforms = sorted({b["platform"] for b in board})
 
-    print(f"DK Pick6 strikeouts  {date}   board {len(board)} legs, "
-          f"model matched {len(legs)}"
+    print(f"Pick'em edge [{'/'.join(PLATFORM_ABBR.get(p, p) for p in platforms)}]  {date}"
+          f"   board {len(board)} legs, model matched {len(legs)}"
           + (f"  (unmatched: {', '.join(unmatched)})" if unmatched else ""))
     if not legs:
         print("No model<->board matches (is the slate live / names aligned?).")
         return
 
-    kept = {id(x) for e in entries for x in e["legs"]}
     kept_names = {x["name"] for e in entries for x in e["legs"]}
-    be = breakeven_per_leg(N_PICKS)
-    print(f"\nLEG SCORES (need P >= breakeven {be*100:.1f}% + {MARGIN*100:.0f}%margin; "
-          f"RotoWire must agree)")
+    print(f"\nLEG SCORES (kept legs clear the size/platform breakeven + "
+          f"{MARGIN*100:.0f}% margin; RotoWire must agree)")
     print(f"  {'player':22}{'prop':>5}{'line':>6}{'lambda':>8}{'pick':>7}{'modelP':>8}"
           f"{'RW':>6}{'play':>6}")
     for l in sorted(legs, key=lambda x: -score_leg(x)["p"]):
@@ -160,22 +178,23 @@ def main() -> None:
               f"{rwtxt:>6}{play:>6}")
 
     if not entries:
-        print(f"\nNo playable entry: fewer than {MIN_PICKS} independent legs clear "
-              "breakeven+margin across distinct games today. Stop.")
+        print("\nNo playable entry today: no 2-5 pick combo clears breakeven+margin "
+              "on any platform across distinct games. Stop.")
         return
-    if n < N_PICKS:
-        print(f"\n(Only enough edge for a {n}-pick — stepped down from {N_PICKS}.)")
 
     daily_cap, scale = res["daily_cap"], res["scale"]
-    print(f"\nPOWER-PLAY ENTRIES  ({n}-pick, <= {MAX_ENTRIES}/day, "
-          f"daily cap ${daily_cap:.0f}{', scaled '+format(scale,'.2f')+'x' if scale<1 else ''})")
-    print("  (P_ind = independent; P_cor = day-correlation-adjusted, used for sizing)")
-    print(f"  {'#':>2} {'legs':38}{'P_ind':>7}{'P_cor':>7}{'mult':>6}{'EV_cor':>8}{'stake':>8}")
+    apps = "/".join(PLATFORM_ABBR.get(p, p) for p in platforms)
+    print(f"\nPICK'EM ENTRIES  (best 2/3/4/5-pick, line-shopped across {apps}, "
+          f"daily cap ${daily_cap:.0f}"
+          f"{', scaled '+format(scale,'.2f')+'x' if scale<1 else ''})")
+    print("  (P_cor = day-correlation-adjusted win prob, used for sizing)")
+    print(f"  {'#':>2} {'app':>3}{'pk':>3}  {'legs':40}{'P_cor':>7}{'mult':>6}{'EV':>7}{'stake':>8}")
     for i, e in enumerate(entries, 1):
         names = " + ".join(leg_label(l) for l in e["legs"])
         conc = " *same-side" if e["same_side"] else ""
-        print(f"  {i:>2} {names:38}{e['p']*100:6.1f}%{e['corr_p']*100:6.1f}%"
-              f"{e['mult']:5.1f}x{e['corr_ev']*100:+7.0f}%{e['stake']:8.2f}{conc}")
+        print(f"  {i:>2} {PLATFORM_ABBR.get(e['platform'], e['platform']):>3}{e['n']:>3}  "
+              f"{names:40}{e['corr_p']*100:6.1f}%{e['mult']:5.1f}x"
+              f"{e['corr_ev']*100:+6.0f}%{e['stake']:8.2f}{conc}")
 
     om_i = outcome_matrix(entries)
     om = corr_outcome_matrix(entries)
