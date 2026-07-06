@@ -67,14 +67,16 @@ def _read_board_file(path: str) -> list[dict]:
 
 
 def load_board(date: str) -> list[dict]:
-    """Pitcher board plus an optional batter board (captured from DK's separate
-    tabs): pick6_board_<date>.csv  +  pick6_board_<date>_batters.csv. Returns []
-    if no board was captured for the date (so the cron/dashboard don't crash)."""
+    """Load the day's board from data/boards/<date>.csv (+ _batters), where the
+    capture helper writes it; falls back to the legacy pick6_board_<date>.csv.
+    Returns [] if nothing captured (so the cron/dashboard don't crash)."""
     rows = []
     for suffix in ("", "_batters"):
-        p = os.path.join(DATA, f"pick6_board_{date}{suffix}.csv")
-        if os.path.exists(p):
-            rows += _read_board_file(p)
+        for p in (os.path.join(DATA, "boards", f"{date}{suffix}.csv"),
+                  os.path.join(DATA, f"pick6_board_{date}{suffix}.csv")):
+            if os.path.exists(p):
+                rows += _read_board_file(p)
+                break  # prefer boards/ when present
     return rows
 
 
