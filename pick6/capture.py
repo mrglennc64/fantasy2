@@ -117,7 +117,13 @@ def main():
         print(__doc__); return
     date, platform, market = sys.argv[1], sys.argv[2], sys.argv[3]
     is_batter = market in BATTER
-    lines = [l.strip() for l in sys.stdin if l.strip()]
+    # 4th arg = a text file with the pasted board (Windows-friendly); else stdin.
+    if len(sys.argv) >= 5:
+        with open(sys.argv[4], encoding="utf-8") as fh:
+            raw = fh.readlines()
+    else:
+        raw = sys.stdin.readlines()
+    lines = [l.strip() for l in raw if l.strip()]
 
     cards = parse_raw(lines)
     if not cards:                      # no position lines -> try the simple format
