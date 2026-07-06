@@ -40,16 +40,34 @@ NOISE = re.compile(r"strikeouts|thrown|total bases|hits|home runs|runs|rbis?|"
                    r"more|less|^\d{1,2}:\d\d|am|pm|sun|mon|tue|wed|thu|fri|sat", re.I)
 
 
-def slate_games(date: str) -> dict[str, str]:
+def slate_rows(date: str) -> list[tuple[str, str]]:
+    """[(full_name, game)] from the live slate — for name + game resolution."""
     try:
         s = json.load(urllib.request.urlopen(
             f"https://strike.perfecthold.online/api/v2/slate?date={date}", timeout=60))
     except Exception:
-        return {}
-    out = {}
-    for r in s.get("rows", []) or []:
-        out[norm(r["pitcher"])] = str(r.get("game_pk") or r.get("opponent") or "")
-    return out
+        return []
+    return [(r["pitcher"], str(r.get("game_pk") or r.get("opponent") or ""))
+            for r in s.get("rows", []) or []]
+
+
+def resolve(name: str, slate: list[tuple[str, str]]) -> tuple[str, str]:
+    """DK abbreviates first names ('J. Ryan'); map to the slate's full name + game
+    by last name (+ first initial to disambiguate). Returns (full_or_orig, game)."""
+    key = norm(name)
+    for full, g in slate:
+        if norm(full) == key:
+            return full, g
+    parts = name.replace(".", " ").split()
+    if len(parts) >= 2:
+        last, fi = norm(parts[-1]), parts[0][:1].lower()
+        cands = [(full, g) for full, g in slate if norm(full).split()[-1:] == [last]]
+        if len(cands) == 1:
+            return cands[0]
+        for full, g in cands:
+            if norm(full)[:1] == fi:
+                return full, g
+    return name, ""
 
 
 def parse_raw(lines: list[str]) -> list[dict]:
@@ -108,7 +126,7 @@ def main():
         print("could not parse any player cards — paste the board text or use "
               "'Player  line  [more|less|both]' rows."); return
 
-    games = {} if is_batter else slate_games(date)
+    slate = [] if is_batter else slate_rows(date)
     os.makedirs(BOARDS, exist_ok=True)
     suffix = "_batters" if is_batter else ""
     path = os.path.join(BOARDS, f"{date}{suffix}.csv")
@@ -121,7 +139,9 @@ def main():
         if not exists:
             w.writeheader()
         for c in cards:
-            game = c["game"] or games.get(norm(c["name"]), "")
+            full, sgame = resolve(c["name"], slate) if slate else (c["name"], "")
+            c["name"] = full
+            game = c["game"] or sgame
             if not game:
                 miss.append(c["name"])
             w.writerow({"date": date, "player": c["name"], "team": "", "game": game,
