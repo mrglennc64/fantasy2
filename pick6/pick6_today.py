@@ -130,15 +130,24 @@ def compute_entries(date: str) -> dict:
         e["kelly"] = max(0.0, (e["corr_p"] * b - (1 - e["corr_p"])) / b)
     raw.sort(key=lambda e: e["corr_ev"], reverse=True)
 
-    # Present the BEST entry at each size 2..5 (line-shopped to the best-paying
-    # platform for that size), so the user gets a pick-2 / pick-3 / pick-4 /
-    # pick-5 rather than everything collapsing to the max-EV 5-pick.
-    best_by_size = {}
-    for e in raw:
-        if e["corr_ev"] <= 0:
-            continue
-        best_by_size.setdefault(e["n"], e)  # raw is EV-sorted -> first is best
-    entries = [best_by_size[k] for k in sorted(best_by_size)]
+    # Best entry at each size 2..5 (line-shopped to the best platform), with a
+    # per-player cluster cap so no single player anchors every entry — on 7/5 one
+    # leg (Weathers) sat in all 4 sizes, so his miss went 0/4. Iterate sizes
+    # SMALLEST-first (shorter sets hit more often) so each size gets a fair pick
+    # of the scarce strong legs; cap => one miss sinks <= MAX_PER_PLAYER entries.
+    # On a thin slate this yields fewer than 4 entries — honestly, it should.
+    used, entries = Counter(), []
+    for n in ENTRY_SIZES:
+        for e in raw:                       # raw is EV-desc
+            if e["n"] != n or e["corr_ev"] <= 0:
+                continue
+            names = [l["name"] for l in e["legs"]]
+            if any(used[nm] >= MAX_PER_PLAYER for nm in names):
+                continue
+            entries.append(e)
+            for nm in names:
+                used[nm] += 1
+            break
 
     daily_cap = scale = None
     if entries:
