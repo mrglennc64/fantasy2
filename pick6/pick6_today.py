@@ -29,6 +29,9 @@ BANKROLL, MAX_ENTRIES, PER_PS = 1000.0, 6, 3   # PER_PS: entries kept per platfo
 MAX_PER_PLAYER = 2                              # cluster cap: max entries anchored on one player
 DAILY_FRAC, KELLY_FRAC, PER_CAP, MARGIN = 0.05, 0.25, 0.02, 0.05
 REQUIRE_AGREE = True  # Phase 3: drop legs RotoWire disagrees with
+# "best_per_size" = best 2/3/4/5-pick (one per size); "top_ev" = the MAX_ENTRIES
+# highest-EV entries regardless of size. Both apply the per-player cluster cap.
+PICKER_MODE = os.environ.get("FANTASY_PICKER_MODE", "best_per_size")
 PLATFORM_ABBR = {"dk_pick6": "DK", "prizepicks": "PP", "underdog": "UD",
                  "sleeper": "SL", "betr": "BR", "parlayplay": "Pr"}
 
@@ -130,24 +133,33 @@ def compute_entries(date: str) -> dict:
         e["kelly"] = max(0.0, (e["corr_p"] * b - (1 - e["corr_p"])) / b)
     raw.sort(key=lambda e: e["corr_ev"], reverse=True)
 
-    # Best entry at each size 2..5 (line-shopped to the best platform), with a
-    # per-player cluster cap so no single player anchors every entry — on 7/5 one
-    # leg (Weathers) sat in all 4 sizes, so his miss went 0/4. Iterate sizes
-    # SMALLEST-first (shorter sets hit more often) so each size gets a fair pick
-    # of the scarce strong legs; cap => one miss sinks <= MAX_PER_PLAYER entries.
-    # On a thin slate this yields fewer than 4 entries — honestly, it should.
+    # Select entries under the per-player cluster cap so no single player anchors
+    # every entry (on 7/5 one leg, Weathers, sat in all 4 sizes -> his miss went
+    # 0/4). Two modes (FANTASY_PICKER_MODE):
+    #   best_per_size — best 2/3/4/5-pick, smallest-first (shorter sets hit more
+    #                   often), one per size; thin slates yield <4, honestly.
+    #   top_ev        — the MAX_ENTRIES highest-EV entries regardless of size.
     used, entries = Counter(), []
-    for n in ENTRY_SIZES:
+
+    def _take(e):
+        names = [l["name"] for l in e["legs"]]
+        if e["corr_ev"] <= 0 or any(used[nm] >= MAX_PER_PLAYER for nm in names):
+            return False
+        entries.append(e)
+        for nm in names:
+            used[nm] += 1
+        return True
+
+    if PICKER_MODE == "top_ev":
         for e in raw:                       # raw is EV-desc
-            if e["n"] != n or e["corr_ev"] <= 0:
-                continue
-            names = [l["name"] for l in e["legs"]]
-            if any(used[nm] >= MAX_PER_PLAYER for nm in names):
-                continue
-            entries.append(e)
-            for nm in names:
-                used[nm] += 1
-            break
+            if len(entries) >= MAX_ENTRIES:
+                break
+            _take(e)
+    else:                                    # best_per_size
+        for n in ENTRY_SIZES:
+            for e in raw:
+                if e["n"] == n and _take(e):
+                    break
 
     daily_cap = scale = None
     if entries:
