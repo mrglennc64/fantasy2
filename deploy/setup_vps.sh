@@ -39,6 +39,9 @@ cp "$REPO/deploy/fantasy.logrotate" /etc/logrotate.d/fantasy
 echo "30 20 * * * $REPO/deploy/cron_daily.sh >> $REPO/logs/cron.log 2>&1" | crontab -u "$USER" -
 
 echo
-echo "installed. verify with a manual run:"
+echo "installed. FOR AUTO-SCRAPE, add your (rotated) Firecrawl key:"
+echo "  echo 'FIRECRAWL_API_KEY=fc-...' | sudo tee $REPO/.env"
+echo "  sudo chown $USER:$USER $REPO/.env && sudo chmod 600 $REPO/.env"
+echo "then verify with a manual run:"
 echo "  sudo -u $USER $REPO/deploy/cron_daily.sh"
 echo "  crontab -u $USER -l"
