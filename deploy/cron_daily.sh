@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Daily Fantasy pipeline — runs as the non-root `fantasy` user via cron.
-#   pull -> grade settled entries -> scrape real board -> log -> rebuild + publish.
+# Fantasy pipeline — runs HOURLY as the non-root `fantasy` user (poll-safe).
+#   pull -> grade settled entries -> scrape real board (only until captured) ->
+#   log -> rebuild + publish. The card auto-updates the hour PrizePicks posts
+#   today's board; off-hour polls are harmless no-ops (freshness guard).
 # Writes ONLY inside /opt/fantasy and /var/www/fantasy. See deploy/setup_vps.sh
 # for the one-time hardened install (dedicated user, logrotate, crontab).
 set -euo pipefail
@@ -18,12 +20,18 @@ git pull --quiet --ff-only || echo "git pull skipped (local changes / offline)"
 echo "=== $(date -u) daily run for $DATE ==="
 "$PY" pick6/grade.py            || echo "grade failed"
 
-# Auto-scrape today's REAL PrizePicks board via Firecrawl (Firecrawl proxies the
-# request, so this works from the VPS). Overwrite the day's board for a fresh
-# pull; if the key is missing or the scrape fails, fall back to any pasted board.
+# Auto-scrape today's REAL PrizePicks board via Firecrawl. POLL-SAFE: this script
+# runs hourly, but only scrapes until it captures today's board — once captured
+# it skips (so it doesn't burn Firecrawl credits or re-scrape after you'd bet).
+# The scraper's freshness guard refuses a stale board, so early polls (before
+# PrizePicks posts) are harmless no-ops. Net effect: the card auto-appears within
+# the hour of the board going live, not at a fixed clock time.
 if [ -n "${FIRECRAWL_API_KEY:-}" ]; then
-    rm -f "$REPO/data/boards/$DATE.csv" "$REPO/data/boards/${DATE}_batters.csv"
-    "$PY" pick6/scrape_firecrawl.py "$DATE" prizepicks || echo "scrape failed — using pasted board if present"
+    if [ -f "$REPO/data/boards/$DATE.csv" ]; then
+        echo "today's board already captured — skipping scrape (poll-safe)"
+    else
+        "$PY" pick6/scrape_firecrawl.py "$DATE" prizepicks || echo "board not live yet / scrape failed — retry next poll"
+    fi
 else
     echo "no FIRECRAWL_API_KEY in .env — skipping auto-scrape (paste a board instead)"
 fi

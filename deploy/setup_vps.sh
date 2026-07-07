@@ -35,8 +35,11 @@ chmod 755 "$WWW"
 # 4. logrotate for the cron log
 cp "$REPO/deploy/fantasy.logrotate" /etc/logrotate.d/fantasy
 
-# 5. daily crontab for the fantasy user (NOT root) — 20:30 UTC ~= 16:30 ET
-echo "30 20 * * * $REPO/deploy/cron_daily.sh >> $REPO/logs/cron.log 2>&1" | crontab -u "$USER" -
+# 5. POLLING crontab for the fantasy user (NOT root) — top of every hour, 13:00-
+# 23:00 UTC (~9am-7pm ET), when PrizePicks posts + games run. The script is
+# poll-safe (scrapes only until it captures today's board), so the card auto-
+# updates within the hour the board goes live instead of at a fixed time.
+echo "0 13-23 * * * $REPO/deploy/cron_daily.sh >> $REPO/logs/cron.log 2>&1" | crontab -u "$USER" -
 
 echo
 echo "installed. FOR AUTO-SCRAPE, add your (rotated) Firecrawl key:"
