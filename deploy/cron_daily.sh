@@ -36,12 +36,16 @@ else
     echo "no FIRECRAWL_API_KEY in .env — skipping auto-scrape (paste a board instead)"
 fi
 
-"$PY" pick6/log_entries.py "$DATE" || echo "log skipped (no board / already logged)"
-"$PY" web/build_site.py "$DATE" "$REPO/web/dist/index.html"
-
-# publish — fantasy user owns WWW; the file is world-readable so nginx (www-data)
-# can serve it. No chown needed, so this works without root.
-install -m 644 "$REPO/web/dist/index.html" "$WWW/index.html"
+# Only rebuild + publish once today's board exists — otherwise leave the last
+# good card up (don't wipe it with an empty "no board yet" page).
+if [ -f "$REPO/data/boards/$DATE.csv" ]; then
+    "$PY" pick6/log_entries.py "$DATE" || echo "log skipped (already logged)"
+    "$PY" web/build_site.py "$DATE" "$REPO/web/dist/index.html"
+    install -m 644 "$REPO/web/dist/index.html" "$WWW/index.html"
+    echo "published $DATE card"
+else
+    echo "no board for $DATE yet — leaving the last published card up"
+fi
 
 # housekeeping: dated backup of the record, prune backups older than 14 days.
 cp -f "$REPO/data/pick6_entries.csv" "$REPO/data/pick6_entries.$(date +%Y%m%d).bak" 2>/dev/null || true
