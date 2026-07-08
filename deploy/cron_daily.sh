@@ -25,6 +25,11 @@ git fetch --quiet origin main 2>/dev/null && git reset --hard --quiet origin/mai
 echo "=== $(date -u) daily run for $DATE ==="
 "$PY" pick6/grade.py            || echo "grade failed"
 
+# Archive today's slate lambdas FROZEN (poll-safe: writes once, never rewrites).
+# Dispersion re-fits need bet-time projections — /v2/slate re-projects past
+# dates with current stats, which leaks outcomes into any fit made later.
+"$PY" pick6/archive_slate.py "$DATE" || echo "slate archive failed"
+
 # Auto-scrape today's REAL PrizePicks board via Firecrawl. POLL-SAFE: this script
 # runs hourly, but only scrapes until it captures today's board — once captured
 # it skips (so it doesn't burn Firecrawl credits or re-scrape after you'd bet).

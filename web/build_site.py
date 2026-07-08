@@ -43,14 +43,21 @@ def track_record():
         pnl += stake * (mult - 1) if w else -stake
         staked += stake
         won += w
-    graded_legs = [(float(l["model_p"]), l["leg_won"] == "1") for l in rows if l["leg_won"] != ""]
-    cal = None
-    if graded_legs:
-        n = len(graded_legs)
-        cal = (n, sum(p for p, _ in graded_legs) / n, sum(1 for _, w in graded_legs if w) / n)
+    graded_legs = [((r.get("market") or "strikeouts"), float(r["model_p"]),
+                    r["leg_won"] == "1")
+                   for r in rows if r["leg_won"] in ("1", "0")]
+
+    def _cal(legs):
+        n = len(legs)
+        return (n, sum(p for p, _ in legs) / n,
+                sum(1 for _, w in legs if w) / n) if legs else None
+
+    cal = _cal([(p, w) for m, p, w in graded_legs])
+    cal_k = _cal([(p, w) for m, p, w in graded_legs if m == "strikeouts"])
+    cal_bat = _cal([(p, w) for m, p, w in graded_legs if m != "strikeouts"])
     return {"staked": staked, "pnl": pnl, "won": won, "graded": graded,
             "roi": (pnl / staked * 100 if staked else 0), "pending": len(entries),
-            "cal": cal}
+            "cal": cal, "cal_k": cal_k, "cal_bat": cal_bat}
 
 
 CSS = """
@@ -109,9 +116,15 @@ def render(date, res, tr, status="live", today=None, gen="", frozen=None):
                      f"<td class='n'>{rwp}</td><td>{agree}</td>"
                      f"<td style='color:var(--pos)'>{keep}</td></tr>")
 
-    cal = tr["cal"]
-    cal_html = (f"predicted {cal[1]*100:.1f}% vs realized {cal[2]*100:.1f}% "
-                f"(gap {(cal[2]-cal[1])*100:+.1f} pts, n={cal[0]})") if cal else "no graded legs yet"
+    def _cal_txt(c):
+        return (f"predicted {c[1]*100:.1f}% vs realized {c[2]*100:.1f}% "
+                f"(gap {(c[2]-c[1])*100:+.1f} pts, n={c[0]})") if c else None
+
+    parts = [t for t in (
+        _cal_txt(tr["cal"]),
+        tr.get("cal_k") and "pitchers: " + _cal_txt(tr["cal_k"]),
+        tr.get("cal_bat") and "batters: " + _cal_txt(tr["cal_bat"])) if t]
+    cal_html = " · ".join(parts) if parts else "no graded legs yet"
     roicls = "pos" if tr["pnl"] >= 0 else "neg"
 
     if status == "live":

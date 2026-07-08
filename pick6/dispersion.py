@@ -5,6 +5,15 @@ live_settled.csv (6/28-7/3, 2026). Head-to-head reliability (calibration/
 compare.py): NegBinom cut the weighted mean |gap| from 3.2 -> 1.6 pts and fixed
 the 60-65% band (Poisson -6.9 pts overconfident -> NB +0.4 pts) that Pick6 legs
 live in. Re-fit as the settled sample grows (target n>=400).
+
+Re-validated 2026-07-08 (calibration/refit_dispersion.py + walk_forward.py) on
+278 FROZEN starts: on the 147 current-era starts r=16.6 is the exact MLE with
+nominal PIT coverage (central-50 50.3%, central-80 81.0%) and the NLL curve is
+flat across r in [12, 60] — kept. The 7/7 forward calibration gap traced to the
+un-capped batter baseline legs, not K dispersion. CAUTION: never fit r on
+/v2/slate re-projections of past dates — the API recomputes with current season
+stats (outcome leakage; it fit r->500, i.e. fake Poisson). Fit only on frozen
+lambdas: data/slates/<date>.csv (archive_slate.py) or live_settled.csv.
 """
 # NB size/dispersion. Var(Y) = mu * (1 + mu/r); r -> inf recovers Poisson.
 DISPERSION_R = 16.6

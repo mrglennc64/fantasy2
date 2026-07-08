@@ -1,18 +1,26 @@
-"""Re-fit the NB strikeout dispersion on settled starts pulled live.
+"""Re-fit the NB strikeout dispersion on settled starts.
 
     python refit_dispersion.py [start] [end]     # default: last 30 days -> yesterday
 
-Pairs come from the same sources the picker uses — strike/mlb-edge /v2/slate
-(projected expected_ks = mu) joined to MLB StatsAPI final boxscores (actual K) —
-so no local files are needed. Fits r by MLE (nb.fit_dispersion), then validates
-walk-forward: for each day, fit on earlier days only and score the held-out
-day's mid-PIT coverage, comparing the CURRENT production r against the re-fit.
+mu comes from FROZEN slate archives (data/slates/<date>.csv, written at bet time
+by pick6/archive_slate.py) joined to MLB StatsAPI final boxscores (actual K).
 
-Reads nothing and writes nothing in pick6/ — paste the recommended r into
-pick6/dispersion.py (with provenance) when the held-out coverage supports it.
+*** LEAKAGE WARNING (learned 2026-07-08): for dates with no frozen archive this
+falls back to /v2/slate, which RE-PROJECTS past dates with current season stats
+— each game's own strikeouts are inside the projection, so the fit collapses
+toward Poisson (r=500 on 123 leaked starts vs r=16.6 on frozen ones). Days that
+used the leaky fallback are counted and, if any exist, the recommendation is
+suppressed. Only trust a fit whose sample is fully frozen. ***
+
+Fits r by MLE (nb.fit_dispersion), then validates walk-forward: for each day,
+fit on earlier days only and score the held-out day's mid-PIT coverage against
+the CURRENT production r. Reads nothing and writes nothing in pick6/ — paste
+the recommended r into pick6/dispersion.py (with provenance) when the held-out
+coverage supports it.
 """
 from __future__ import annotations
 
+import csv
 import os
 import sys
 from collections import defaultdict
@@ -21,30 +29,45 @@ from datetime import date as _date, timedelta
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "pick6"))
 from nb import fit_dispersion, nb_pmf                       # noqa: E402
 from dispersion import DISPERSION_R                          # noqa: E402
-from backtest_pick6 import slate_legs                        # noqa: E402
 from grade import final_stats                                # noqa: E402
-from feed import norm                                        # noqa: E402
+from feed import norm, slate_lambdas                         # noqa: E402
 
 MIN_TRAIN_STARTS = 40
+SLATES = os.path.join(os.path.dirname(__file__), "..", "data", "slates")
 
 
-def collect_pairs(start: str, end: str) -> dict[str, list[tuple[float, int]]]:
-    """date -> [(mu, actual_ks)] for every settled start with a projection."""
+def day_lambdas(ds: str) -> tuple[str, dict[str, float]]:
+    """('frozen'|'REPROJECTED', norm(pitcher) -> mu). Frozen archive preferred."""
+    p = os.path.join(SLATES, f"{ds}.csv")
+    if os.path.exists(p):
+        rows = csv.DictReader(open(p, encoding="utf-8"))
+        return "frozen", {norm(r["pitcher"]): float(r["expected_ks"]) for r in rows}
+    try:
+        return "REPROJECTED", slate_lambdas(ds)
+    except Exception:
+        return "REPROJECTED", {}
+
+
+def collect_pairs(start: str, end: str) -> tuple[dict[str, list[tuple[float, int]]], int]:
+    """(date -> [(mu, actual_ks)], leaky_day_count) for settled starts."""
     by_day: dict[str, list[tuple[float, int]]] = defaultdict(list)
+    leaky = 0
     d0, d1 = _date.fromisoformat(start), _date.fromisoformat(end)
     d = d0
     while d <= d1:
         ds = d.isoformat()
-        legs = slate_legs(ds)
-        if legs:
+        src, lams = day_lambdas(ds)
+        if lams:
             actuals = final_stats(ds)
-            for l in legs:
-                a = actuals.get(norm(l["name"]), {}).get("strikeouts")
+            for key, mu in lams.items():
+                a = actuals.get(key, {}).get("strikeouts")
                 if a is not None:
-                    by_day[ds].append((float(l["lam"]), int(a)))
-        print(f"  {ds}: {len(by_day.get(ds, []))} settled starts", flush=True)
+                    by_day[ds].append((float(mu), int(a)))
+            if by_day.get(ds) and src == "REPROJECTED":
+                leaky += 1
+        print(f"  {ds}: {len(by_day.get(ds, []))} settled starts [{src}]", flush=True)
         d += timedelta(days=1)
-    return by_day
+    return by_day, leaky
 
 
 def mid_pit(actual: int, mu: float, r: float) -> float:
@@ -64,7 +87,7 @@ def main() -> None:
     start = sys.argv[1] if len(sys.argv) > 1 else (
         _date.fromisoformat(end) - timedelta(days=29)).isoformat()
     print(f"collecting settled starts {start} -> {end} ...")
-    by_day = collect_pairs(start, end)
+    by_day, leaky = collect_pairs(start, end)
     dates = sorted(by_day)
     pairs = [p for d in dates for p in by_day[d]]
     if len(pairs) < MIN_TRAIN_STARTS:
@@ -96,10 +119,15 @@ def main() -> None:
             n, c50, c80 = coverage(pits)
             print(f"  {tag:28} n={n:>4}   {c50*100:5.1f}%          {c80*100:5.1f}%")
 
-    print(f"\n  => recommended r for pick6/dispersion.py: {r_new:.1f}")
-    print("     (coverage below ~46% under production r but closer under the re-fit")
-    print("      means the old r was too confident; update it. Bias is NOT fixed by")
-    print("      r — a large bias needs a mean correction in the projection itself.)")
+    if leaky:
+        print(f"\n  !! {leaky} day(s) used RE-PROJECTED lambdas (no frozen archive) —")
+        print("     outcome leakage inflates r. NO recommendation from this sample;")
+        print("     wait until archive_slate.py has covered the whole range.")
+    else:
+        print(f"\n  => recommended r for pick6/dispersion.py: {r_new:.1f}  (fully frozen sample)")
+        print("     (coverage below ~46% under production r but closer under the re-fit")
+        print("      means the old r was too confident; update it. Bias is NOT fixed by")
+        print("      r — a large bias needs a mean correction in the projection itself.)")
 
 
 if __name__ == "__main__":

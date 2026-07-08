@@ -11,3 +11,4 @@ web/dist/
 data/pick6_entries.csv
 data/pick6_entries.*.bak
 data/boards/*_scored.json
+data/slates/

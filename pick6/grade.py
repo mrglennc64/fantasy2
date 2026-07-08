@@ -147,16 +147,32 @@ def main() -> None:
         print("  (no fully-graded entries yet)")
 
     # ---- leg-level calibration (pushes excluded — they're refunds) ----------
-    graded_legs = [(float(l["model_p"]), l["leg_won"] == "1")
+    # Split pitcher (calibrated K model) from batter (season-rate baseline):
+    # the two have separate failure modes, and a pooled gap points at the
+    # wrong fix (7/7: pooled -14 pts read as "re-fit dispersion" when the
+    # drift lived in the un-capped batter legs).
+    def _cal(legs):
+        n = len(legs)
+        pred = sum(p for p, _ in legs) / n
+        real = sum(1 for _, w in legs if w) / n
+        return n, pred, real
+
+    graded_legs = [(l.get("market") or "strikeouts", float(l["model_p"]),
+                    l["leg_won"] == "1")
                    for l in rows if l["leg_won"] in ("1", "0")]
     if graded_legs:
-        n = len(graded_legs)
-        pred = sum(p for p, _ in graded_legs) / n
-        real = sum(1 for _, w in graded_legs if w) / n
-        print(f"\nLEG CALIBRATION (out-of-sample)  n={n}  "
-              f"predicted {pred*100:.1f}%  realized {real*100:.1f}%  "
-              f"gap {(real-pred)*100:+.1f} pts")
-        print("  (grows each day; when n is large, drift here => re-fit dispersion)")
+        print("\nLEG CALIBRATION (out-of-sample)")
+        groups = [("all", [(p, w) for m, p, w in graded_legs]),
+                  ("pitcher (K)", [(p, w) for m, p, w in graded_legs
+                                   if m == "strikeouts"]),
+                  ("batter", [(p, w) for m, p, w in graded_legs
+                              if m != "strikeouts"])]
+        for tag, legs in [(t, g) for t, g in groups if g]:
+            n, pred, real = _cal(legs)
+            print(f"  {tag:12} n={n:<4} predicted {pred*100:.1f}%  "
+                  f"realized {real*100:.1f}%  gap {(real-pred)*100:+.1f} pts")
+        print("  (pitcher drift at scale => re-fit dispersion on FROZEN slates;"
+              " batter drift => baseline/matchup problem)")
 
 
 if __name__ == "__main__":
