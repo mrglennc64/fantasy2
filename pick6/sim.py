@@ -21,7 +21,7 @@ from itertools import combinations
 
 from config import breakeven_per_leg, entry_ev, entry_multiplier
 from dispersion import DISPERSION_R
-from markets import p_over
+from markets import p_cap, p_over
 
 # ---- step 1: side probabilities from a calibrated Negative-Binomial ----------
 # Phase 2 (calibration/compare.py) showed Poisson under-disperses strikeouts and
@@ -57,6 +57,9 @@ def score_leg(leg: dict) -> dict:
     market = leg.get("market", "strikeouts")
     pm = p_over(market, leg["lam"], leg["line"])
     side, p = ("more", pm) if pm >= 0.5 else ("less", 1.0 - pm)
+    cap = p_cap(market)
+    if cap is not None:
+        p = min(p, cap)  # baseline markets: no fitted dispersion, cap the claim
     boost = leg.get("more_boost", 1.0) if side == "more" else 1.0
     return {**leg, "side": side, "p": p, "boost": boost}
 

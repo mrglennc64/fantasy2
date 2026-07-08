@@ -126,7 +126,7 @@ def render(date, res, tr, status="live", today=None, gen=""):
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>Fantasy — pick'em edge</title><style>{CSS}</style></head><body><div class=wrap>
 <h1>Fantasy · pick'em edge</h1>
-<div class=sub>Pitcher strikeouts (calibrated) + batter props (StatsAPI baseline) · showing slate {date} · PAPER ONLY</div>
+<div class=sub>Pitcher strikeouts (calibrated) + batter props (StatsAPI matchup-adjusted baseline) · showing slate {date} · PAPER ONLY</div>
 {banner}
 
 <div class="card"><h2>Paper track record</h2><div class=kpi>
@@ -145,7 +145,7 @@ def render(date, res, tr, status="live", today=None, gen=""):
 <div class=toggle><button id=tb-pitcher class=on onclick="flt('pitcher')">Pitchers</button><button id=tb-batter onclick="flt('batter')">Batters</button><button id=tb-all onclick="flt('all')">All</button></div></div>
 <table id=legtbl style="margin-top:12px">
 <tr><th>player</th><th>prop</th><th>game</th><th class=n>DK line</th><th class=n>λ</th><th>pick</th><th class=n>model P</th><th class=n>RW proj</th><th>RW</th><th>play</th></tr>
-{leg_rows}</table><div style="margin-top:8px;color:var(--mut);font-size:12px">RW = RotoWire second opinion: ✓ agrees · ✗ disagrees (gated out) · · no free projection. Batter props use a StatsAPI season-rate baseline (matchup-neutral, lower confidence).</div></div>
+{leg_rows}</table><div style="margin-top:8px;color:var(--mut);font-size:12px">RW = RotoWire second opinion: ✓ agrees · ✗ disagrees (gated out) · · no free projection. Batter props use a StatsAPI season-rate baseline adjusted for the opposing starter + platoon split; no fitted dispersion yet, so batter model P is capped at 70%.</div></div>
 <script>
 function flt(g){{document.querySelectorAll('#legtbl tr[data-side]').forEach(function(r){{r.style.display=(g==='all'||r.dataset.side===g)?'':'none';}});
 ['pitcher','batter','all'].forEach(function(k){{document.getElementById('tb-'+k).className=(k===g)?'on':'';}});}}

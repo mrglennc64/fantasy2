@@ -85,7 +85,7 @@ def _project(b: dict, date: str, slate: dict) -> float | None:
     if b["market"] == "strikeouts":
         return slate.get(b["name"])
     season = int(date[:4])
-    return batter_project(b["name"], b["market"], season, b.get("slot"))
+    return batter_project(b["name"], b["market"], season, b.get("slot"), date=date)
 
 
 def compute_entries(date: str) -> dict:

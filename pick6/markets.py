@@ -60,6 +60,19 @@ def confidence(market: str) -> str:
     return MARKETS.get(market, {}).get("confidence", "baseline")
 
 
+# Baseline markets have NO fitted dispersion, so their tail probabilities are
+# not trustworthy — a .380-SLG regular vs a 0.5 TB line prices at 85%+ on season
+# rate alone. Cap what a baseline leg may claim so it can never outrank a
+# calibrated leg on manufactured confidence (7/7: both entries anchored on an
+# 86% baseline batter leg). Remove per-market once its dispersion is fitted.
+BASELINE_P_CAP = 0.70
+
+
+def p_cap(market: str) -> float | None:
+    """Max model P a leg in this market may claim, or None (uncapped)."""
+    return BASELINE_P_CAP if confidence(market) == "baseline" else None
+
+
 def p_over(market: str, mu: float, line: float) -> float:
     """P(stat > line) for a half-integer line, per the market's distribution.
 
