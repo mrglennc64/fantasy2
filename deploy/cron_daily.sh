@@ -23,6 +23,23 @@ git fetch --quiet origin main 2>/dev/null && git reset --hard --quiet origin/mai
 [ -f "$REPO/.env" ] && { set -a; . "$REPO/.env"; set +a; }
 
 echo "=== $(date -u) daily run for $DATE ==="
+
+# One-time fresh start (2026-07-08): archive the pre-transition record so the
+# accuracy log begins today under the new scoring. Nothing is deleted — files
+# move to data/archive-pre-2026-07-08/. Self-extinguishing: runs only while
+# the legacy per-row history file is still present. Frozen slates + consensus
+# are kept (they are the input for the coefficient fits).
+if [ -f "$REPO/data/pick6_entries.csv" ]; then
+    ARC="$REPO/data/archive-pre-2026-07-08"
+    mkdir -p "$ARC"
+    mv -f "$REPO"/data/pick6_entries.csv "$REPO"/data/pick6_entries.*.bak \
+          "$REPO"/data/predictions_log.csv "$REPO"/data/predictions_log.*.bak \
+          "$REPO"/data/boards/*_scored.json \
+          "$REPO"/data/boards/2026-07-05*.csv "$REPO"/data/boards/2026-07-06*.csv \
+          "$REPO"/data/boards/2026-07-07*.csv "$ARC"/ 2>/dev/null || true
+    echo "fresh start: archived pre-transition records -> $ARC"
+fi
+
 "$PY" pick6/grade.py            || echo "grade failed"
 
 # Archive today's slate lambdas FROZEN (poll-safe: writes once, never rewrites).
