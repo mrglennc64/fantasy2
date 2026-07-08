@@ -22,6 +22,7 @@ from itertools import combinations
 from config import breakeven_per_leg, entry_ev, entry_multiplier
 from dispersion import DISPERSION_R
 from markets import p_cap, p_over
+from projection import corrected_mu
 
 # ---- step 1: side probabilities from a calibrated Negative-Binomial ----------
 # Phase 2 (calibration/compare.py) showed Poisson under-disperses strikeouts and
@@ -55,7 +56,10 @@ def score_leg(leg: dict) -> dict:
     """leg in: name, game, line, lam, market, [more_boost]. Chooses side + prob
     using the market's distribution (markets.p_over); defaults to strikeouts."""
     market = leg.get("market", "strikeouts")
-    pm = p_over(market, leg["lam"], leg["line"])
+    # Mean correction first (pick6/projection.py): raw expected_ks has NO
+    # demonstrated edge over the line on frozen data — score at the shrunk mean.
+    mu = corrected_mu(market, leg["lam"], leg["line"])
+    pm = p_over(market, mu, leg["line"])
     side, p = ("more", pm) if pm >= 0.5 else ("less", 1.0 - pm)
     cap = p_cap(market)
     if cap is not None:
