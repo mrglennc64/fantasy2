@@ -75,7 +75,7 @@ th{color:var(--mut);font-weight:600;font-size:12px}td.n,th.n{text-align:right;fo
 """
 
 
-def render(date, res, tr, status="live", today=None, gen=""):
+def render(date, res, tr, status="live", today=None, gen="", frozen=None):
     today = today or date
     legs = sorted(res["legs"], key=lambda l: -_p(l))
     entry_rows = ""
@@ -115,8 +115,10 @@ def render(date, res, tr, status="live", today=None, gen=""):
     roicls = "pos" if tr["pnl"] >= 0 else "neg"
 
     if status == "live":
+        lock = (f'picks locked {frozen} (won\'t change on rebuilds)' if frozen
+                else f'updated {gen}')
         banner = (f'<div class="banner live">🟢 LIVE — today\'s board ({today}) is up. '
-                  f'These are today\'s picks.<small>updated {gen} · bet before first pitch</small></div>')
+                  f'These are today\'s picks.<small>{lock} · bet before first pitch</small></div>')
     else:
         banner = (f'<div class="banner wait">🟠 WAITING — today\'s ({today}) board isn\'t '
                   f'posted yet. Below is the most recent card ({date}), not today\'s.'
@@ -157,7 +159,8 @@ hypothetically at quarter-Kelly. Nothing here is betting advice. Verify every DK
 </div></body></html>"""
 
 
-# score legs the same way the picker does, for display
+# score legs the same way the picker does, for display. Snapshot legs already
+# carry frozen side/p (from log time) — those win, so the page can't re-pick.
 from sim import score_leg  # noqa: E402
 
 
@@ -167,8 +170,8 @@ def _s(l):
     return l["_scored"]
 
 
-def _p(l): return _s(l)["p"]
-def _side(l): return _s(l)["side"]
+def _p(l): return l["p"] if "p" in l else _s(l)["p"]
+def _side(l): return l["side"] if "side" in l else _s(l)["side"]
 
 
 def _kept(l, res):
@@ -192,13 +195,24 @@ def main():
         render_date, status = (avail[-1] if avail else today), "waiting"
 
     gen = datetime.datetime.now(datetime.timezone.utc).strftime("%b %d %H:%M UTC")
-    res = compute_entries(render_date)
+    # Render from the frozen snapshot when entries were logged for this date —
+    # a live recompute would silently re-pick with drifted inputs (see 7/7).
+    snap = os.path.join(boards, f"{render_date}_scored.json")
+    frozen = None
+    if os.path.exists(snap):
+        import json
+        res = json.load(open(snap, encoding="utf-8"))
+        frozen = res.get("frozen_at")
+    else:
+        res = compute_entries(render_date)
     tr = track_record()
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
-        f.write(render(render_date, res, tr, status=status, today=today, gen=gen))
+        f.write(render(render_date, res, tr, status=status, today=today, gen=gen,
+                       frozen=frozen))
     print(f"wrote {out}  [{status}] showing {render_date} "
-          f"({len(res['legs'])} legs, {len(res['entries'])} entries)")
+          f"({len(res['legs'])} legs, {len(res['entries'])} entries)"
+          + (f"  [frozen {frozen}]" if frozen else "  [live recompute]"))
 
 
 if __name__ == "__main__":

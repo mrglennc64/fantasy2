@@ -9,3 +9,5 @@ web/dist/
 # runtime state — the paper track record is owned by whichever host runs the
 # cron (kv8); committing it would fight the daily writes on git pull.
 data/pick6_entries.csv
+data/pick6_entries.*.bak
+data/boards/*_scored.json

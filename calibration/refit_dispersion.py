@@ -1,0 +1,106 @@
+"""Re-fit the NB strikeout dispersion on settled starts pulled live.
+
+    python refit_dispersion.py [start] [end]     # default: last 30 days -> yesterday
+
+Pairs come from the same sources the picker uses — strike/mlb-edge /v2/slate
+(projected expected_ks = mu) joined to MLB StatsAPI final boxscores (actual K) —
+so no local files are needed. Fits r by MLE (nb.fit_dispersion), then validates
+walk-forward: for each day, fit on earlier days only and score the held-out
+day's mid-PIT coverage, comparing the CURRENT production r against the re-fit.
+
+Reads nothing and writes nothing in pick6/ — paste the recommended r into
+pick6/dispersion.py (with provenance) when the held-out coverage supports it.
+"""
+from __future__ import annotations
+
+import os
+import sys
+from collections import defaultdict
+from datetime import date as _date, timedelta
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "pick6"))
+from nb import fit_dispersion, nb_pmf                       # noqa: E402
+from dispersion import DISPERSION_R                          # noqa: E402
+from backtest_pick6 import slate_legs                        # noqa: E402
+from grade import final_stats                                # noqa: E402
+from feed import norm                                        # noqa: E402
+
+MIN_TRAIN_STARTS = 40
+
+
+def collect_pairs(start: str, end: str) -> dict[str, list[tuple[float, int]]]:
+    """date -> [(mu, actual_ks)] for every settled start with a projection."""
+    by_day: dict[str, list[tuple[float, int]]] = defaultdict(list)
+    d0, d1 = _date.fromisoformat(start), _date.fromisoformat(end)
+    d = d0
+    while d <= d1:
+        ds = d.isoformat()
+        legs = slate_legs(ds)
+        if legs:
+            actuals = final_stats(ds)
+            for l in legs:
+                a = actuals.get(norm(l["name"]), {}).get("strikeouts")
+                if a is not None:
+                    by_day[ds].append((float(l["lam"]), int(a)))
+        print(f"  {ds}: {len(by_day.get(ds, []))} settled starts", flush=True)
+        d += timedelta(days=1)
+    return by_day
+
+
+def mid_pit(actual: int, mu: float, r: float) -> float:
+    below = sum(nb_pmf(i, mu, r) for i in range(actual))
+    return below + 0.5 * nb_pmf(actual, mu, r)
+
+
+def coverage(pits: list[float]) -> tuple[int, float, float]:
+    n = len(pits)
+    c50 = sum(1 for p in pits if 0.25 <= p <= 0.75) / n
+    c80 = sum(1 for p in pits if 0.10 <= p <= 0.90) / n
+    return n, c50, c80
+
+
+def main() -> None:
+    end = sys.argv[2] if len(sys.argv) > 2 else (_date.today() - timedelta(days=1)).isoformat()
+    start = sys.argv[1] if len(sys.argv) > 1 else (
+        _date.fromisoformat(end) - timedelta(days=29)).isoformat()
+    print(f"collecting settled starts {start} -> {end} ...")
+    by_day = collect_pairs(start, end)
+    dates = sorted(by_day)
+    pairs = [p for d in dates for p in by_day[d]]
+    if len(pairs) < MIN_TRAIN_STARTS:
+        print(f"only {len(pairs)} starts — not enough to fit. Widen the range.")
+        return
+
+    bias = sum(a - mu for mu, a in pairs) / len(pairs)
+    r_new = fit_dispersion(pairs)
+    print(f"\n{len(pairs)} settled starts over {len(dates)} days")
+    print(f"mean projection bias (actual - mu): {bias:+.2f} K "
+          f"{'(model OVER-projects)' if bias < -0.25 else '(model UNDER-projects)' if bias > 0.25 else '(roughly unbiased)'}")
+    print(f"full-sample MLE r = {r_new:.1f}   (production r = {DISPERSION_R})")
+
+    # walk-forward: held-out PIT coverage under production r vs re-fit-as-you-go
+    held_prod, held_wf = [], []
+    seen: list[tuple[float, int]] = []
+    for d in dates:
+        if len(seen) >= MIN_TRAIN_STARTS:
+            r_wf = fit_dispersion(seen)
+            for mu, a in by_day[d]:
+                held_prod.append(mid_pit(a, mu, DISPERSION_R))
+                held_wf.append(mid_pit(a, mu, r_wf))
+        seen.extend(by_day[d])
+
+    print("\n  HELD-OUT interval coverage      central-50 (~50%)  central-80 (~80%)")
+    for tag, pits in ((f"production r={DISPERSION_R}", held_prod),
+                      ("walk-forward re-fit", held_wf)):
+        if pits:
+            n, c50, c80 = coverage(pits)
+            print(f"  {tag:28} n={n:>4}   {c50*100:5.1f}%          {c80*100:5.1f}%")
+
+    print(f"\n  => recommended r for pick6/dispersion.py: {r_new:.1f}")
+    print("     (coverage below ~46% under production r but closer under the re-fit")
+    print("      means the old r was too confident; update it. Bias is NOT fixed by")
+    print("      r — a large bias needs a mean correction in the projection itself.)")
+
+
+if __name__ == "__main__":
+    main()
