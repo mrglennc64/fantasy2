@@ -30,6 +30,11 @@ echo "=== $(date -u) daily run for $DATE ==="
 # dates with current stats, which leaks outcomes into any fit made later.
 "$PY" pick6/archive_slate.py "$DATE" || echo "slate archive failed"
 
+# Freeze FantasyPros daily consensus too (candidate replacement mu source —
+# expected_ks tested edgeless vs the line 7/8; consensus must EARN its way in
+# via fit_mean.py on these frozen snapshots before anything bets off it).
+"$PY" pick6/consensus.py "$DATE" || echo "consensus archive failed"
+
 # Auto-scrape today's REAL PrizePicks board via Firecrawl. POLL-SAFE: this script
 # runs hourly, but only scrapes until it captures today's board — once captured
 # it skips (so it doesn't burn Firecrawl credits or re-scrape after you'd bet).
