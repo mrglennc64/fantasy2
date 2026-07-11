@@ -13,7 +13,7 @@ vocabulary; the removed modules are all recoverable from git history.
 Through 2026-07-07 the repo was built around a hypothetical multi-pick
 selection loop layered on top of the projections:
 
-- **Combination builder** (`sim.py`) — assembled 2–5 pick sets across
+- **Combination builder** (`sim.py`) — assembled 2–5 selection sets across
   platforms, priced them with the platforms' published multipliers, computed
   an expected-value figure per set, and sized hypothetical positions with a
   fractional criterion against a notional $1,000 balance.
@@ -22,8 +22,8 @@ selection loop layered on top of the projections:
   days with no qualifying combination produced *no output at all* ("Stop.").
 - **$-denominated record** — `log_entries.py`/`grade.py` tracked results in
   dollars: net figures, percentage return, sets-landed counts.
-- **State-labelled dashboard** — LIVE / WAITING banners, "picks locked",
-  "these are today's picks", hypothetical-loop disclaimers.
+- **State-labelled dashboard** — LIVE / WAITING banners, lock-time
+  labels, hypothetical-loop disclaimers.
 - **Raw projections trusted at face value** — the strikeout mean
   (`expected_ks`) fed the Negative-Binomial directly; whatever confidence the
   distribution produced was displayed and acted on.

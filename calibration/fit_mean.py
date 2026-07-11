@@ -18,7 +18,7 @@ Two candidate corrections, evaluated WALK-FORWARD by date (fit on days < d,
 score day d) against the raw model:
   affine:  mu' = a + b*mu               (global recentering, no line needed)
   anchor:  mu' = line + s*(mu - line)   (shrink toward the published line;
-                                         the line is a sharp consensus mean —
+                                         the line is a strong consensus mean —
                                          s<1 = "trust our disagreement with
                                          the consensus only s much")
 Scored on what the accuracy record measures: the model-chosen side's stated p
@@ -97,7 +97,8 @@ def collect() -> list[dict]:
     # 3) frozen slate archives (only days that have settled by run time)
     if os.path.isdir(SLATES):
         for fn in sorted(os.listdir(SLATES)):
-            if not fn.endswith(".csv"):
+            # skip consensus snapshots (different schema: role/player/fp_*)
+            if not fn.endswith(".csv") or fn.endswith("_consensus.csv"):
                 continue
             ds = fn[:-4]
             for r in csv.DictReader(open(os.path.join(SLATES, fn), encoding="utf-8")):

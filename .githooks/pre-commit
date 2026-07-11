@@ -9,12 +9,14 @@ set -euo pipefail
 # Banned terms (case-insensitive, word-ish boundaries). Platform proper nouns
 # (PrizePicks, ParlayPlay, Betr, DK Pick6) and data-source URLs/filenames are
 # handled by the allowlist below, not by weakening the terms.
-TERMS='\b(bet|bets|betting|wager(ing|s)?|stake[sd]?|staking|bankroll|kelly|parlay|payout|breakeven|power[- ]play|paper[- ](mode|only|track)|calibrated[- ]mode|switch(ed|ing)? (on|off)|activat(e|ed|ing|ion)|deactivat(e|ed|ing|ion))\b'
+TERMS='\b(bet|bets|betting|wager(ing|s)?|stake[sd]?|staking|bankroll|kelly|parlay|payout|breakeven|power[- ]play|paper[- ](mode|only|track)|calibrated[- ]mode|switch(ed|ing)? (on|off)|activat(e|ed|ing|ion)|deactivat(e|ed|ing|ion)|edges?|sharp|steam|fade[sd]?|line[- ]shopp?(ing|ed)|market[- ]advantage|picks?)\b'
 
 # Lines that may legitimately contain a banned substring:
 #   - external URLs / API paths we don't control (rotowire /betting/, betSubject)
+#   - proper nouns and data-source names (mlb-edge service, Pick6/PrizePicks
+#     platforms, the pick'em product category, the pick6/ directory)
 #   - the legacy data filename pick6_entries.csv and this hook itself
-ALLOW='rotowire\.com|betSubject|pick6_entries|\.githooks/pre-commit|check-terms-allow'
+ALLOW="rotowire\.com|betSubject|pick6_entries|\.githooks/pre-commit|check-terms-allow|mlb-edge|pick'?em|[Pp]ick6|PrizePicks|[0-9]-pick|multi-pick"
 
 fail=0
 while IFS= read -r f; do

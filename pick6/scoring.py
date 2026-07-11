@@ -7,11 +7,12 @@ For each (player, market, line) the scorer emits real numbers, always:
   side        which side of the line the model leans ("more"/"less")
   p           the leaned side's probability (confidence)
 
-Strikeout probabilities use a Negative-Binomial with the dispersion fitted on
-settled data (pick6/dispersion.py) and the mean anchored per pick6/projection.py
-(a continuous, data-fitted shrink coefficient — see that module's provenance).
-Other markets use the distribution declared in markets.py, with a probability
-ceiling (markets.p_cap) where no dispersion has been fitted yet.
+The probability pipeline is LINE-FREE end to end: an affine-recentered mean
+(pick6/projection.py, fitted on frozen projection/actual pairs), the market's
+distribution (NB with dispersion fitted on settled data for strikeouts), and
+a final probability calibration fitted on the model's own graded history
+(pick6/calibrate.py). The published line appears only as the threshold the
+probability is about and as a reference column — never inside the engine.
 
 There is no qualification threshold here: every row gets scored and reported.
 Rankings order by confidence (distance from 50%); they never suppress output.
@@ -20,8 +21,9 @@ from __future__ import annotations
 
 import math
 
+from calibrate import calibrate
 from dispersion import DISPERSION_R
-from markets import p_cap, p_over
+from markets import market_side as market_group, p_cap, p_over
 from projection import corrected_mu
 
 _EPS = 1e-9
@@ -47,21 +49,23 @@ def score_leg(leg: dict) -> dict:
     """leg in: name, game, line, lam, market. Out: leg + predicted / p_more /
     p_less / side / p — real numbers for every row, no exceptions."""
     market = leg.get("market", "strikeouts")
-    # Two probability tracks, both logged and graded (dual-track A/B on the
-    # live record, added 2026-07-11):
-    #   raw      — straight from the projection, no anchor, no ceiling: the
-    #              source model standing on its own.
-    #   anchored — mean anchored per projection.py + un-fitted-dispersion
-    #              ceiling: what the frozen evidence currently supports.
+    # Two probability tracks, both logged and graded (live A/B on the record):
+    #   raw        — straight from the projection, no correction, no ceiling.
+    #   calibrated — LINE-FREE pipeline (2026-07-11): affine-recentered mean
+    #                (projection.py) -> market distribution -> probability
+    #                calibration fitted on our own graded history
+    #                (calibrate.py). The line is only the threshold the
+    #                probability is about — never the mean or an anchor.
     # The displayed point prediction is always the raw projection.
     pm_raw = p_over(market, leg["lam"], leg["line"])
-    mu = corrected_mu(market, leg["lam"], leg["line"])
+    mu = corrected_mu(market, leg["lam"])
     pm = p_over(market, mu, leg["line"])
     side, p = ("more", pm) if pm >= 0.5 else ("less", 1.0 - pm)
     cap = p_cap(market)
     if cap is not None and p > cap:
         p = cap                      # un-fitted dispersion: cap the confidence
-        pm = cap if side == "more" else 1.0 - cap
+    p = calibrate(market_group(market), p)
+    pm = p if side == "more" else 1.0 - p
     return {**leg, "predicted": leg["lam"], "p_more": pm, "p_less": 1.0 - pm,
             "side": side, "p": p, "p_more_raw": pm_raw}
 
