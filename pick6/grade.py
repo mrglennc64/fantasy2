@@ -200,9 +200,50 @@ def main() -> None:
         n, hit, pred = _rate(grp)
         print(f"  {lo:.2f}-{hi:4.2f}  n={n:<4} stated {pred*100:.1f}%  "
               f"realized {hit*100:.1f}%  gap {(hit-pred)*100:+.1f} pts")
-    print("\n(pitcher drift at scale => re-fit the shrink coefficient on FROZEN"
-          "\n slates (calibration/fit_mean.py); batter drift => baseline/matchup"
-          "\n problem in batter_feed.py)")
+    # ---- proper scoring metrics (Brier / log-loss) + point accuracy --------
+    import math as _m
+    pit = [r for r in graded if r.get("market", "strikeouts") == "strikeouts"]
+    ps = [(float(r["model_p"]), r["result"] == "1") for r in pit]
+    if ps:
+        brier = sum((p - (1.0 if w else 0.0)) ** 2 for p, w in ps) / len(ps)
+        ll = -sum(_m.log(max(p if w else 1 - p, 1e-9)) for p, w in ps) / len(ps)
+        errs = [abs(float(r["predicted"]) - float(r["actual"])) for r in pit
+                if r.get("predicted") and r.get("actual") != ""]
+        mae = sum(errs) / len(errs)
+        rmse = (sum(e * e for e in errs) / len(errs)) ** 0.5
+        print(f"\nSCORING METRICS (pitcher)  Brier {brier:.4f}   log-loss {ll:.4f}"
+              f"   projection MAE {mae:.2f} K   RMSE {rmse:.2f} K")
+        print("  (baselines: coin-flip Brier 0.2500, log-loss 0.6931 — must beat"
+              " both for the probabilities to carry information)")
+
+    # ---- confidence tiers (labels only — grouping, not actions) ------------
+    TIERS = [("A+", 0.62, 1.01), ("A", 0.59, 0.62), ("B", 0.56, 0.59),
+             ("C", 0.53, 0.56), ("D", 0.00, 0.53)]
+    print("\nCONFIDENCE TIERS (pitcher)")
+    for tag, lo, hi in TIERS:
+        grp = [(p, w) for p, w in ps if lo <= p < hi]
+        if not grp:
+            continue
+        n = len(grp)
+        pred = sum(p for p, _ in grp) / n
+        real = sum(1 for _, w in grp if w) / n
+        print(f"  {tag:3} [{lo*100:.0f}-{hi*100:.0f}%)  n={n:<4} "
+              f"stated {pred*100:.1f}%  realized {real*100:.1f}%")
+
+    # ---- daily error analysis: biggest projection misses, latest slate -----
+    if pit:
+        last = max(r["date"] for r in pit)
+        day = sorted((r for r in pit if r["date"] == last),
+                     key=lambda r: -abs(float(r["predicted"]) - float(r["actual"])))
+        print(f"\nLARGEST PROJECTION MISSES — {last}")
+        for r in day[:5]:
+            print(f"  {r['player']:22} predicted {float(r['predicted']):5.2f}  "
+                  f"line {r['line']:>4}  actual {r['actual']:>2}  "
+                  f"({'lean correct' if r['result'] == '1' else 'lean wrong'})")
+
+    print("\n(pitcher drift at scale => re-fit the affine mean on FROZEN slates"
+          "\n (calibration/fit_mean.py); confidence spread returns when the weekly"
+          "\n calibration refit finds ranking skill)")
 
 
 if __name__ == "__main__":

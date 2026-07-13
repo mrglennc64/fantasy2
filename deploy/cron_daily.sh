@@ -40,7 +40,9 @@ if [ -f "$REPO/data/pick6_entries.csv" ]; then
     echo "fresh start: archived pre-transition records -> $ARC"
 fi
 
-"$PY" pick6/grade.py            || echo "grade failed"
+# grade + publish the daily diagnostic (metrics, tiers, largest misses)
+{ "$PY" pick6/grade.py | tee "$REPO/web/dist/diag.txt"; } || echo "grade failed"
+install -m 644 "$REPO/web/dist/diag.txt" "$WWW/diag.txt" 2>/dev/null || true
 
 # Archive today's slate lambdas FROZEN (poll-safe: writes once, never rewrites).
 # Dispersion re-fits need generation-time projections — /v2/slate re-projects past
@@ -84,6 +86,8 @@ install -m 644 "$REPO/web/dist/index.html" "$WWW/index.html"
 if [ "$(date +%u)" = "7" ] && [ ! -f "$REPO/data/.refit-$(date +%G-%V)" ]; then
     "$PY" calibration/fit_mean.py > "$REPO/web/dist/refit_s.txt" 2>&1 || true
     install -m 644 "$REPO/web/dist/refit_s.txt" "$WWW/refit_s.txt" 2>/dev/null || true
+    "$PY" calibration/refit_calibration.py > "$REPO/web/dist/refit_calibration.txt" 2>&1 || true
+    install -m 644 "$REPO/web/dist/refit_calibration.txt" "$WWW/refit_calibration.txt" 2>/dev/null || true
     touch "$REPO/data/.refit-$(date +%G-%V)"
 fi
 

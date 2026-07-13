@@ -97,6 +97,11 @@ th{color:var(--mut);font-weight:600;font-size:12px}td.n,th.n{text-align:right;fo
 """
 
 
+def tier(p):
+    return ("A+" if p >= 0.62 else "A" if p >= 0.59 else "B" if p >= 0.56
+            else "C" if p >= 0.53 else "D")
+
+
 def _p(l): return l["p"]
 def _side(l): return l["side"]
 
@@ -116,9 +121,10 @@ def render(date, res, tr, today=None, gen="", frozen=None):
         top_rows += (f"<tr><td>{l['name']}</td><td><span class=pill>{mkt}</span></td>"
                      f"<td class='n'>{pred:.2f}</td><td class='n'>{corr:.2f}</td>"
                      f"<td>{_side(l).upper()}</td><td class='n'>{_p(l)*100:.1f}%</td>"
+                     f"<td><span class=pill>{tier(_p(l))}</span></td>"
                      f"<td class='n'>{l['line']}</td><td class='n'>{corr - l['line']:+.2f}</td></tr>")
     if not top_rows:
-        top_rows = "<tr><td colspan=8 style='color:var(--mut)'>No scored rows yet for this date.</td></tr>"
+        top_rows = "<tr><td colspan=9 style='color:var(--mut)'>No scored rows yet for this date.</td></tr>"
 
     leg_rows = ""
     for l in legs:
@@ -139,6 +145,7 @@ def render(date, res, tr, today=None, gen="", frozen=None):
                      f"<td class='n'>{pred:.2f}</td><td class='n'>{corr:.2f}</td>"
                      f"<td class='n'>{pm_txt}</td>"
                      f"<td>{_side(l).upper()}</td><td class='n'>{_p(l)*100:.1f}%</td>"
+                     f"<td><span class=pill>{tier(_p(l))}</span></td>"
                      f"<td class='n'>{praw_txt}</td>"
                      f"<td class='n'>{l['line']}</td><td class='n'>{corr - l['line']:+.2f}</td>"
                      f"<td class='n'>{rwp}</td><td>{agree}</td></tr>")
@@ -179,12 +186,12 @@ def render(date, res, tr, today=None, gen="", frozen=None):
 </div><div style="margin-top:10px;color:var(--mut);font-size:13px">Out-of-sample calibration: {cal_html}</div></div>
 
 <div class=card><h2>Highest-confidence predictions today</h2><table>
-<tr><th>player</th><th>prop</th><th class=n>predicted</th><th class=n>corrected</th><th>lean</th><th class=n>P</th><th class=n>ref line</th><th class=n>deviation</th></tr>
+<tr><th>player</th><th>prop</th><th class=n>predicted</th><th class=n>corrected</th><th>lean</th><th class=n>P</th><th>tier</th><th class=n>ref line</th><th class=n>deviation</th></tr>
 {top_rows}</table></div>
 
 <div class=card><h2>Full board — every pitcher scored</h2>
 <table id=legtbl style="margin-top:12px">
-<tr><th>player</th><th>prop</th><th>game</th><th class=n>predicted</th><th class=n>corrected</th><th class=n>P(more)</th><th>lean</th><th class=n>P</th><th class=n>raw P(more)</th><th class=n>ref line</th><th class=n>deviation</th><th class=n>RW proj</th><th>RW</th></tr>
+<tr><th>player</th><th>prop</th><th>game</th><th class=n>predicted</th><th class=n>corrected</th><th class=n>P(more)</th><th>lean</th><th class=n>P</th><th>tier</th><th class=n>raw P(more)</th><th class=n>ref line</th><th class=n>deviation</th><th class=n>RW proj</th><th>RW</th></tr>
 {leg_rows}</table><div style="margin-top:8px;color:var(--mut);font-size:12px">RW = RotoWire independent projection: = same lean · ≠ opposite lean. Probabilities are computed line-free: affine-corrected mean, fitted dispersion, and a calibration layer fitted on this system's own graded history. The reference line is shown for comparison only; the lean and deviation both follow the corrected mean, so they always agree.</div></div>
 
 <div class="card" style="color:var(--mut);font-size:13px">Statistical projections with quantified uncertainty, graded daily against official MLB results above. Point predictions are raw model output; probabilities reflect only what settled data has supported.</div>
