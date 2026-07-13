@@ -78,10 +78,11 @@ def compute_board(date: str) -> dict:
     """Score the whole board. Returns a dict consumed by the CLI display, the
     prediction logger (log_predictions.py) and the dashboard. No printing here.
     """
-    board = load_board(date)
-    # strikeout projections come from the mlb-edge slate (batch); batter
-    # projections from the StatsAPI baseline.
-    slate = lambdas_for([b for b in board if b["market"] == "strikeouts"], date)
+    # PITCHERS ONLY (2026-07-13): batter markets are no longer scored,
+    # logged, or displayed. Their board lines still get captured/archived as
+    # frozen data; re-enable by removing this filter.
+    board = [b for b in load_board(date) if b["market"] == "strikeouts"]
+    slate = lambdas_for(board, date)
 
     legs, unmatched = [], []
     for b in board:

@@ -153,11 +153,10 @@ def main() -> None:
         return n, hit / n, pred
 
     print("ACCURACY RECORD (out-of-sample; exact-on-line outcomes excluded)")
-    groups = [("all", graded),
-              ("pitcher (K)", [r for r in graded
-                               if r.get("market", "strikeouts") == "strikeouts"]),
-              ("batter", [r for r in graded
-                          if r.get("market", "strikeouts") != "strikeouts"])]
+    # PITCHERS ONLY in the report (2026-07-13); batter history stays in the
+    # CSV and keeps grading for continuity, but is no longer reported.
+    groups = [("pitcher (K)", [r for r in graded
+                               if r.get("market", "strikeouts") == "strikeouts"])]
     for tag, rs in [(t, g) for t, g in groups if g]:
         n, hit, pred = _rate(rs)
         print(f"  {tag:12} n={n:<4} stated {pred*100:.1f}%  "

@@ -45,7 +45,8 @@ def latest_results():
 
 
 def accuracy_record():
-    rows = _rows(PRED_LOG)
+    rows = [r for r in _rows(PRED_LOG)
+            if (r.get("market") or "strikeouts") == "strikeouts"]
     graded = [r for r in rows if r.get("result") in ("1", "0")]
 
     def _cal(rs):
@@ -54,8 +55,6 @@ def accuracy_record():
                 sum(1 for r in rs if r["result"] == "1") / n) if rs else None
 
     cal = _cal(graded)
-    cal_k = _cal([r for r in graded if (r.get("market") or "strikeouts") == "strikeouts"])
-    cal_bat = _cal([r for r in graded if (r.get("market") or "strikeouts") != "strikeouts"])
 
     # raw track: the source model's own probabilities on the same rows
     raw_legs = []
@@ -76,7 +75,7 @@ def accuracy_record():
                sum(1 for _, w in raw_legs if w) / n)
     return {"logged": len(rows), "graded": len(graded),
             "hit": (cal[2] * 100 if cal else 0.0),
-            "cal": cal, "cal_k": cal_k, "cal_bat": cal_bat, "raw": raw}
+            "cal": cal, "raw": raw}
 
 
 CSS = """
@@ -104,7 +103,9 @@ def _side(l): return l["side"]
 
 def render(date, res, tr, today=None, gen="", frozen=None):
     today = today or date
-    legs = sorted(res["legs"], key=lambda l: -_p(l))
+    legs = sorted((l for l in res["legs"]
+                   if l.get("market", "strikeouts") == "strikeouts"),
+                  key=lambda l: -_p(l))
 
     top_rows = ""
     for l in legs[:TOP_N]:
@@ -146,11 +147,8 @@ def render(date, res, tr, today=None, gen="", frozen=None):
         return (f"stated {c[1]*100:.1f}% vs realized {c[2]*100:.1f}% "
                 f"(gap {(c[2]-c[1])*100:+.1f} pts, n={c[0]})") if c else None
 
-    parts = [t for t in (
-        _cal_txt(tr["cal"]),
-        tr.get("cal_k") and "pitchers: " + _cal_txt(tr["cal_k"]),
-        tr.get("cal_bat") and "batters: " + _cal_txt(tr["cal_bat"])) if t]
-    cal_html = " · ".join(parts) if parts else "no graded predictions yet"
+    cal_html = (_cal_txt(tr["cal"]) if tr.get("cal")
+                else "no graded predictions yet")
     if tr.get("raw"):
         cal_html += ("<br>Raw track (source model, no anchor/ceiling): "
                      + _cal_txt(tr["raw"]))
@@ -171,7 +169,7 @@ def render(date, res, tr, today=None, gen="", frozen=None):
 <meta name=viewport content="width=device-width,initial-scale=1">
 <title>Fantasy — MLB prop projections</title><style>{CSS}</style></head><body><div class=wrap>
 <h1>Fantasy · MLB prop projections</h1>
-<div class=sub>Independent projections: pitcher strikeouts (affine-corrected mean, Negative-Binomial, own-history probability calibration) + batter props (StatsAPI usage/matchup baseline) · market lines shown as reference only · slate {date}</div>
+<div class=sub>Independent pitcher-strikeout projections (affine-corrected mean, Negative-Binomial, own-history probability calibration) · market lines shown as reference only · slate {date}</div>
 {status}
 
 <div class="card"><h2>Accuracy record</h2><div class=kpi>
@@ -184,17 +182,10 @@ def render(date, res, tr, today=None, gen="", frozen=None):
 <tr><th>player</th><th>prop</th><th class=n>predicted</th><th class=n>corrected</th><th>lean</th><th class=n>P</th><th class=n>ref line</th><th class=n>deviation</th></tr>
 {top_rows}</table></div>
 
-<div class=card><div style="display:flex;justify-content:space-between;align-items:center">
-<h2 style="margin:0">Full board — every row scored</h2>
-<div class=toggle><button id=tb-pitcher class=on onclick="flt('pitcher')">Pitchers</button><button id=tb-batter onclick="flt('batter')">Batters</button><button id=tb-all onclick="flt('all')">All</button></div></div>
+<div class=card><h2>Full board — every pitcher scored</h2>
 <table id=legtbl style="margin-top:12px">
 <tr><th>player</th><th>prop</th><th>game</th><th class=n>predicted</th><th class=n>corrected</th><th class=n>P(more)</th><th>lean</th><th class=n>P</th><th class=n>raw P(more)</th><th class=n>ref line</th><th class=n>deviation</th><th class=n>RW proj</th><th>RW</th></tr>
-{leg_rows}</table><div style="margin-top:8px;color:var(--mut);font-size:12px">RW = RotoWire independent projection: = same lean · ≠ opposite lean · no free projection for that market. Batter props use a StatsAPI season-rate baseline adjusted for the opposing starter + platoon split; markets without a fitted dispersion have their stated probability ceilinged at 70%. Probabilities are computed line-free: affine-corrected mean, fitted dispersion, and a calibration layer fitted on this system's own graded history. The reference line is shown for comparison only; the lean and deviation both follow the corrected mean, so they always agree.</div></div>
-<script>
-function flt(g){{document.querySelectorAll('#legtbl tr[data-side]').forEach(function(r){{r.style.display=(g==='all'||r.dataset.side===g)?'':'none';}});
-['pitcher','batter','all'].forEach(function(k){{document.getElementById('tb-'+k).className=(k===g)?'on':'';}});}}
-flt('pitcher');
-</script>
+{leg_rows}</table><div style="margin-top:8px;color:var(--mut);font-size:12px">RW = RotoWire independent projection: = same lean · ≠ opposite lean. Probabilities are computed line-free: affine-corrected mean, fitted dispersion, and a calibration layer fitted on this system's own graded history. The reference line is shown for comparison only; the lean and deviation both follow the corrected mean, so they always agree.</div></div>
 
 <div class="card" style="color:var(--mut);font-size:13px">Statistical projections with quantified uncertainty, graded daily against official MLB results above. Point predictions are raw model output; probabilities reflect only what settled data has supported.</div>
 </div></body></html>"""

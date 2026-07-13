@@ -78,11 +78,9 @@ fi
 install -m 644 "$REPO/web/dist/index.html" "$WWW/index.html"
 
 # Publish fit reports as static files so constants can be reviewed from
-# anywhere. Daily: batter dispersion fit (log-only, no network). Weekly
+# anywhere. Weekly
 # (Sunday, once): the strikeout anchor-s refit with its confidence interval
 # on the full frozen archive (hits StatsAPI, so not every hour).
-"$PY" calibration/fit_batter.py > "$REPO/web/dist/fit_batter.txt" 2>&1 || true
-install -m 644 "$REPO/web/dist/fit_batter.txt" "$WWW/fit_batter.txt" 2>/dev/null || true
 if [ "$(date +%u)" = "7" ] && [ ! -f "$REPO/data/.refit-$(date +%G-%V)" ]; then
     "$PY" calibration/fit_mean.py > "$REPO/web/dist/refit_s.txt" 2>&1 || true
     install -m 644 "$REPO/web/dist/refit_s.txt" "$WWW/refit_s.txt" 2>/dev/null || true
