@@ -55,17 +55,34 @@ def predict_lambda(pitcher: str, date: str, line: float) -> float | None:
 def lambdas_for(board: list[dict], date: str) -> dict[str, float]:
     """Map each board pitcher -> lambda. board rows need 'pitcher' and 'line'.
 
+    Chain: batch slate -> per-pitcher predict -> OWNED kmodel (StatsAPI-only).
+    The last link means a dead upstream service degrades the source, never
+    the app (7/13: empty slate then HTTP 500 killed the whole day's board).
     Returns keys as the ORIGINAL board pitcher name (so callers can join back).
     """
-    slate = slate_lambdas(date)
+    try:
+        slate = slate_lambdas(date)
+    except Exception:
+        slate = {}
     out: dict[str, float] = {}
+    km = 0
     for b in board:
         name = b.get("name") or b.get("pitcher")
         key = norm(name)
         if key in slate:
             out[name] = slate[key]
-        else:
-            lam = predict_lambda(name, date, b["line"])
-            if lam is not None:
-                out[name] = lam
+            continue
+        lam = predict_lambda(name, date, b["line"])
+        if lam is None:
+            try:
+                from kmodel import project as _kproject
+                lam = _kproject(name, date)
+                km += lam is not None
+            except Exception:
+                lam = None
+        if lam is not None:
+            out[name] = lam
+    if km:
+        print(f"(kmodel fallback projected {km} pitchers — upstream slate had "
+              f"{len(slate)} rows)")
     return out

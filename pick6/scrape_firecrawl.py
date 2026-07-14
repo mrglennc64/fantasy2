@@ -43,6 +43,28 @@ def fc_scrape(url: str, key: str) -> str:
     return data.get("rawHtml") or data.get("markdown") or ""
 
 
+def probables_rows(date: str) -> list[tuple[str, str]]:
+    """[(probable pitcher, gamePk)] straight from MLB StatsAPI — the
+    freshness/resolution source that cannot die with the model service
+    (7/13: empty upstream slate made the guard refuse a perfectly fresh
+    board all day)."""
+    try:
+        with urllib.request.urlopen(
+                "https://statsapi.mlb.com/api/v1/schedule?sportId=1&date="
+                + date + "&hydrate=probablePitcher", timeout=45) as r:
+            s = json.load(r)
+    except Exception:
+        return []
+    out = []
+    for d in s.get("dates", []):
+        for g in d.get("games", []):
+            for side in ("home", "away"):
+                pp = g["teams"][side].get("probablePitcher") or {}
+                if pp.get("fullName"):
+                    out.append((pp["fullName"], str(g["gamePk"])))
+    return out
+
+
 def mlb_league_id(key: str) -> str:
     j = json.loads(fc_scrape("https://api.prizepicks.com/leagues", key))
     for d in j.get("data", []):
@@ -102,9 +124,11 @@ def main():
           + ", ".join(f"{m} {len(v)}" for m, v in sorted(by_market.items())))
 
     # FRESHNESS GUARD: PrizePicks serves yesterday's board until it posts today's
-    # (e.g. overnight US time). If the scraped pitchers aren't on today's actual
-    # slate, it's stale — refuse to write so a good card is never overwritten.
-    pslate = slate_rows(date)
+    # (e.g. overnight US time). If the scraped pitchers aren't among today's
+    # actual probable starters, it's stale — refuse to write so a good card is
+    # never overwritten. Probables come from MLB StatsAPI (independent of the
+    # model service); the upstream slate is only a secondary fallback.
+    pslate = probables_rows(date) or slate_rows(date)
     pitchers = by_market.get("strikeouts", [])
     matched = sum(1 for r in pitchers if resolve(r["player"], pslate)[1]) if pitchers else 0
     if not pitchers or matched < max(2, len(pitchers) * 0.5):

@@ -106,7 +106,29 @@ def _p(l): return l["p"]
 def _side(l): return l["side"]
 
 
-def render(date, res, tr, today=None, gen="", frozen=None):
+def next_slate_date(today):
+    """First date from `today` with regular-season games (StatsAPI), looking
+    ahead a week. None on lookup failure -> caller keeps the generic text."""
+    import json as _json
+    import urllib.request as _rq
+    from datetime import date as _d, timedelta as _td
+    try:
+        d = _d.fromisoformat(today)
+        for i in range(0, 8):
+            ds = (d + _td(days=i)).isoformat()
+            s = _json.load(_rq.urlopen(
+                "https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=" + ds,
+                timeout=30))
+            games = [g for dd in s.get("dates", []) for g in dd.get("games", [])
+                     if g.get("gameType") == "R"]
+            if games:
+                return ds
+    except Exception:
+        pass
+    return None
+
+
+def render(date, res, tr, today=None, gen="", frozen=None, next_slate=None):
     today = today or date
     legs = sorted((l for l in res["legs"]
                    if l.get("market", "strikeouts") == "strikeouts"),
@@ -165,6 +187,10 @@ def render(date, res, tr, today=None, gen="", frozen=None):
                  else f"generated {gen}")
         status = (f'<div class=status>Predictions for {today}.'
                   f'<small>{stamp} · refreshed hourly · graded automatically after games go final</small></div>')
+    elif next_slate and next_slate != today:
+        status = (f'<div class=status>No MLB slate for {today} — next games '
+                  f'{next_slate}. Showing {date}, the latest scored slate.'
+                  f'<small>checked {gen} · predictions resume automatically with the next slate</small></div>')
     else:
         status = (f'<div class=status>Reference lines for {today} not captured yet — '
                   f'showing {date}, the latest scored slate.'
@@ -233,7 +259,8 @@ def main():
     tr = accuracy_record()
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
-        f.write(render(render_date, res, tr, today=today, gen=gen, frozen=frozen))
+        f.write(render(render_date, res, tr, today=today, gen=gen, frozen=frozen,
+                       next_slate=(next_slate_date(today) if render_date != today else None)))
     print(f"wrote {out}  showing {render_date} ({len(res['legs'])} scored rows)"
           + (f"  [frozen {frozen}]" if frozen else "  [live scoring]"))
 
