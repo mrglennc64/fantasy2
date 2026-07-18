@@ -18,6 +18,7 @@ number always comes back for a probable starter with >= 2 prior starts.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import urllib.parse
@@ -26,6 +27,16 @@ from datetime import date as _date
 
 from feed import norm
 from kmodel_params import COEF, FEATURES, INTERCEPT, MEAN, PARKS, SD
+
+try:                                   # emitted by train_kmodel.py from v2 on
+    from kmodel_params import VERSION
+except ImportError:
+    # Params files generated before versioning still need a stable identity, and
+    # a content hash gives one without a retrain: same coefficients -> same
+    # string, any retrain -> a different one. That is the whole contract
+    # mu_version has to satisfy.
+    VERSION = "sha-" + hashlib.md5(
+        repr((FEATURES, MEAN, SD, COEF, INTERCEPT)).encode()).hexdigest()[:8]
 
 _LG_KBF = 0.22
 _PRIOR_BF = 150.0
@@ -129,9 +140,16 @@ def _kbf(h: list[dict], last: int | None) -> float:
     return (k + _PRIOR_BF * _LG_KBF) / (bf + _PRIOR_BF)
 
 
-def project(name: str, date: str) -> float | None:
-    """Model strikeout projection for a probable starter, or None if he has
-    fewer than 2 prior starts this season (no form to project from)."""
+def project_detail(name: str, date: str) -> dict | None:
+    """Projection plus the exact inputs it was computed from, or None if the
+    starter has fewer than 2 prior starts this season (no form to project from).
+
+    `imputed` names the features that fell back to the training mean. That
+    substitution is silent inside the GLM — a pitcher whose opponent lookup
+    failed scores as a league-average matchup and looks like a normal
+    projection. Surfacing it here is what lets the feature sidecar detect
+    serving-vs-training drift instead of it hiding in the residuals.
+    """
     pid = _player_id(name)
     if pid is None:
         return None
@@ -153,9 +171,19 @@ def project(name: str, date: str) -> float | None:
         "rest_days": rest, "park_k": PARKS.get(sched.get("venue"), 1.0),
     }
     z = INTERCEPT
+    imputed = []
     for f, m, s, c in zip(FEATURES, MEAN, SD, COEF):
         x = feats.get(f)
         if x is None:
             x = m                      # missing feature -> training mean
+            imputed.append(f)
         z += c * (x - m) / s
-    return math.exp(z)
+    return {"mu": math.exp(z), "features": feats, "imputed": imputed,
+            "pid": pid, "venue": sched.get("venue"), "team": sched.get("team"),
+            "opp": sched.get("opp"), "version": VERSION}
+
+
+def project(name: str, date: str) -> float | None:
+    """Model strikeout projection for a probable starter, or None."""
+    d = project_detail(name, date)
+    return None if d is None else d["mu"]

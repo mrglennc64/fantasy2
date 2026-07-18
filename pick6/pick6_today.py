@@ -66,12 +66,20 @@ def load_board(date: str) -> list[dict]:
     return rows
 
 
-def _project(b: dict, date: str, slate: dict) -> float | None:
-    """Route a board row to its projection source by market."""
+def _project(b: dict, date: str, slate: dict) -> dict | None:
+    """Route a board row to its projection source by market.
+
+    Returns a record ({"mu", "source", "version", "detail"}) so the source
+    travels with the number all the way to scoring and the log — the whole
+    point being that no downstream step ever has to guess where a mu came from.
+    """
     if b["market"] == "strikeouts":
         return slate.get(b["name"])
     season = int(date[:4])
-    return batter_project(b["name"], b["market"], season, b.get("slot"), date=date)
+    mu = batter_project(b["name"], b["market"], season, b.get("slot"), date=date)
+    if mu is None:
+        return None
+    return {"mu": mu, "source": "statsapi_baseline", "version": "", "detail": None}
 
 
 def compute_board(date: str) -> dict:
@@ -86,13 +94,19 @@ def compute_board(date: str) -> dict:
 
     legs, unmatched = [], []
     for b in board:
-        L = _project(b, date, slate)
-        if L is None:
+        rec = _project(b, date, slate)
+        if rec is None:
             unmatched.append(b["name"])
             continue
+        # _kfeat is underscore-prefixed on purpose: write_snapshot() already
+        # strips _-keys, so the feature blob stays out of the frozen board JSON
+        # without a new exclusion list to keep in sync.
         legs.append(score_leg({"name": b["name"], "game": b["game"],
                                "line": b["line"], "market": b["market"],
-                               "platform": b["platform"], "lam": L}))
+                               "platform": b["platform"], "lam": rec["mu"],
+                               "mu_source": rec["source"],
+                               "mu_version": rec["version"],
+                               "_kfeat": rec["detail"]}))
     annotate(legs)  # RotoWire second opinion — displayed, never a filter
     legs.sort(key=lambda l: -l["p"])
     return {"date": date, "board": board, "legs": legs, "unmatched": unmatched}

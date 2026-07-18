@@ -32,19 +32,24 @@ def _pois_pmf(k, mu):
 # confidence: "calibrated" (dispersion fitted on settled data) vs "baseline"
 # (StatsAPI season-rate projection, matchup-neutral, dispersion NOT yet fitted).
 # side: "pitcher" or "batter" — drives the dashboard toggle.
+# mu_source_doc: prose, for humans reading this table. NOT the per-row
+# mu_source, which is a live value from feed.py naming the estimator that
+# actually produced a given projection — the strikeout chain has three, and
+# which one served is a per-pitcher, per-day fact this table cannot know.
 MARKETS = {
     "strikeouts":   {"dist": "nb", "r": DISPERSION_R, "ready": True, "side": "pitcher",
-                     "confidence": "calibrated", "mu_source": "mlb-edge /v2/slate"},
+                     "confidence": "calibrated",
+                     "mu_source_doc": "mlb-edge /v2/slate -> /v2/predict -> owned kmodel"},
     "hits":         {"dist": "poisson", "ready": True, "side": "batter",
-                     "confidence": "baseline", "mu_source": "StatsAPI season H/AB"},
+                     "confidence": "baseline", "mu_source_doc": "StatsAPI season H/AB"},
     "total_bases":  {"dist": "nb", "r": 4.0, "ready": True, "side": "batter",
-                     "confidence": "baseline", "mu_source": "StatsAPI season TB/AB"},
+                     "confidence": "baseline", "mu_source_doc": "StatsAPI season TB/AB"},
     "home_runs":    {"dist": "poisson", "ready": True, "side": "batter",
-                     "confidence": "baseline", "mu_source": "StatsAPI season HR/AB"},
+                     "confidence": "baseline", "mu_source_doc": "StatsAPI season HR/AB"},
     "rbi":          {"dist": "poisson", "ready": True, "side": "batter",
-                     "confidence": "baseline", "mu_source": "StatsAPI season RBI/PA"},
+                     "confidence": "baseline", "mu_source_doc": "StatsAPI season RBI/PA"},
     "runs":         {"dist": "poisson", "ready": True, "side": "batter",
-                     "confidence": "baseline", "mu_source": "StatsAPI season R/PA"},
+                     "confidence": "baseline", "mu_source_doc": "StatsAPI season R/PA"},
 }
 
 

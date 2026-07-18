@@ -22,11 +22,19 @@ from __future__ import annotations
 
 import math
 
+import params
+
 # group -> (alpha, beta), beta >= 0
-GROUPS = {
+_DEFAULTS = {
     "pitcher": (0.120, 0.00),
     "batter": (0.0, 1.0),
 }
+
+# Learned constants from calibration/refit_calibration.py, which promotes only
+# when the refit beats production on held-out Brier AND log-loss. beta is
+# floored at 0 here too, so a learned value can never invert the displayed lean.
+GROUPS = params.pairs("calibration", _DEFAULTS,
+                      lo_a=-3.0, hi_a=3.0, lo_b=0.0, hi_b=3.0)
 
 
 def calibrate(group: str, p: float) -> float:

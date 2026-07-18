@@ -119,6 +119,45 @@ def main() -> None:
             n, c50, c80 = coverage(pits)
             print(f"  {tag:28} n={n:>4}   {c50*100:5.1f}%          {c80*100:5.1f}%")
 
+    # ---- does dispersion vary with mu? -------------------------------------
+    # The "dispersion by archetype" question, asked in the only form the data
+    # can answer: split by PROJECTED mu rather than by hand-labelled tiers like
+    # "elite" vs "back-end", which are judgements, not measurements. An ace and
+    # a back-end starter genuinely may not share a variance — but one r is the
+    # right answer until the bands separate by more than noise.
+    #
+    # Reported, not shipped. Serving a banded r means p_over() taking r(mu),
+    # and that only earns its complexity if held-out coverage actually improves
+    # — which this print is here to establish first.
+    srt = sorted(pairs, key=lambda p: p[0])
+    k = len(srt) // 3
+    if k >= MIN_TRAIN_STARTS // 3 and k > 0:
+        print("\n  DISPERSION BY PROJECTION BAND (is one r enough?)")
+        bands = (("low  ", srt[:k]), ("mid  ", srt[k:2 * k]), ("high ", srt[2 * k:]))
+        rs = []
+        for tag, chunk in bands:
+            if len(chunk) < 20:
+                continue
+            r_b = fit_dispersion(chunk)
+            mus = sum(mu for mu, _ in chunk) / len(chunk)
+            pits = [mid_pit(a, mu, DISPERSION_R) for mu, a in chunk]
+            _, c50, c80 = coverage(pits)
+            rs.append(r_b)
+            print(f"    {tag} mean mu {mus:5.2f}   MLE r = {r_b:6.1f}   "
+                  f"coverage under production r: {c50*100:4.1f}% / {c80*100:4.1f}%"
+                  f"   (n={len(chunk)})")
+        if len(rs) >= 2 and min(rs) > 0:
+            spread = max(rs) / min(rs)
+            if spread < 2.0:
+                print(f"    => bands within {spread:.1f}x of each other — one "
+                      f"global r is adequate; do NOT add banding.")
+            else:
+                print(f"    => bands differ by {spread:.1f}x. Worth testing a "
+                      f"banded r(mu), but ship it only\n       if held-out "
+                      f"coverage beats the single r — r is weakly identified "
+                      f"on\n       small samples and the NLL curve is famously "
+                      f"flat (see module docstring).")
+
     if leaky:
         print(f"\n  !! {leaky} day(s) used RE-PROJECTED lambdas (no frozen archive) —")
         print("     outcome leakage inflates r. NO recommendation from this sample;")

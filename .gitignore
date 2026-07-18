@@ -15,3 +15,13 @@ data/pick6_entries.*.bak
 data/boards/*_scored.json
 data/slates/
 data/archive-pre-2026-07-08/
+# Serving-time feature snapshots, written once per date alongside the board.
+data/features/
+# Learned constants. params.json is written by the refits ON THE HOST and must
+# NOT be tracked: cron_daily.sh runs `git reset --hard origin/main` every half
+# hour, so a tracked file would be reverted within the hour of being promoted.
+# data/params.pinned.json is deliberately NOT ignored — being tracked is what
+# makes a human pin survive that same reset and outrank the learned file.
+data/params.json
+data/params.json.tmp
+data/params_history/
