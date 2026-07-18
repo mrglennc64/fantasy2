@@ -139,7 +139,7 @@ def render(date, res, tr, today=None, gen="", frozen=None, next_slate=None):
         mkt = MKT_ABBR.get(l["market"], l["market"])
         app = PLATFORM_ABBR.get(l.get("platform", ""), l.get("platform", ""))
         pred = l.get('predicted', l['lam'])
-        corr = corrected_mu(l["market"], pred)
+        corr = corrected_mu(l["market"], pred, l.get("mu_source", "unknown"))
         top_rows += (f"<tr><td>{l['name']}</td><td><span class=pill>{mkt}</span></td>"
                      f"<td class='n'>{pred:.2f}</td><td class='n'>{corr:.2f}</td>"
                      f"<td>{_side(l).upper()}</td><td class='n'>{_p(l)*100:.1f}%</td>"
@@ -161,7 +161,7 @@ def render(date, res, tr, today=None, gen="", frozen=None, next_slate=None):
         praw = l.get("p_more_raw")
         praw_txt = f"{praw*100:.1f}%" if praw is not None else "—"
         pred = l.get('predicted', l['lam'])
-        corr = corrected_mu(l["market"], pred)
+        corr = corrected_mu(l["market"], pred, l.get("mu_source", "unknown"))
         leg_rows += (f"<tr data-side='{grp}'><td>{l['name']}</td>"
                      f"<td><span class=pill>{mkt}</span></td><td>{l.get('game','')}</td>"
                      f"<td class='n'>{pred:.2f}</td><td class='n'>{corr:.2f}</td>"

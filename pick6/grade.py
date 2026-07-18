@@ -20,12 +20,14 @@ import json
 import os
 import unicodedata
 import urllib.request
+from collections import defaultdict
+
+import atomicio
+import params
+from log_schema import FIELDS, SRC_LEGACY, backfill, ensure_schema
 
 LOG = os.path.join(os.path.dirname(__file__), "..", "data", "predictions_log.csv")
 LEGACY = os.path.join(os.path.dirname(__file__), "..", "data", "pick6_entries.csv")
-FIELDS = ["date", "player", "game", "market", "platform", "side", "line",
-          "predicted", "model_p", "raw_p_more", "rw_proj", "rw_agree",
-          "actual", "result"]
 
 
 def norm(name: str) -> str:
@@ -105,11 +107,11 @@ def migrate_legacy() -> None:
             "rw_proj": r.get("rw_proj", ""), "rw_agree": r.get("rw_agree", ""),
             "actual": r.get("actual_ks", ""),
             "result": {"1": "1", "0": "0", "P": "X"}.get(r.get("leg_won", ""), ""),
+            # All legacy history predates the mlb-edge cutover, so this is a
+            # fact about those rows rather than the "unknown" default.
+            "mu_source": SRC_LEGACY, "mu_version": "", "model_p_uncal": "",
         })
-    with open(LOG, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDS)
-        w.writeheader()
-        w.writerows(rows)
+    atomicio.write_rows(LOG, FIELDS, rows)
     print(f"Migrated {len(rows)} legacy rows -> {LOG}")
 
 
@@ -118,7 +120,8 @@ def main() -> None:
     if not os.path.exists(LOG):
         print(f"No log at {LOG} — run log_predictions.py first.")
         return
-    rows = list(csv.DictReader(open(LOG, encoding="utf-8")))
+    ensure_schema(LOG)
+    rows = backfill(list(csv.DictReader(open(LOG, encoding="utf-8"))))
 
     pending_dates = sorted({r["date"] for r in rows if r["result"] == ""})
     results = {d: final_stats(d) for d in pending_dates}
@@ -134,10 +137,7 @@ def main() -> None:
         r["result"] = result_of(r["side"], float(r["line"]), actual)
         graded_now += 1
 
-    with open(LOG, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDS)
-        w.writeheader()
-        w.writerows(rows)
+    atomicio.write_rows(LOG, FIELDS, rows)
     print(f"Graded {graded_now} new predictions.\n")
 
     graded = [r for r in rows if r["result"] in ("1", "0")]
@@ -230,6 +230,61 @@ def main() -> None:
         print(f"  {tag:3} [{lo*100:.0f}-{hi*100:.0f}%)  n={n:<4} "
               f"stated {pred*100:.1f}%  realized {real*100:.1f}%")
 
+    # ---- BY SOURCE: which estimator produced the mu, and how did it do? ----
+    # The headline diagnostic. Each source carries its own mean correction, so
+    # a source-blind average hides exactly the failure this split exists to
+    # catch: between 2026-07-13 and 07-18 the feed fell through to the owned
+    # kmodel while scoring kept applying the mlb-edge affine to it. Aggregate
+    # bias barely moved (the affine's fixed point sits mid-range) but the
+    # kmodel rows alone would have shown it inside two days.
+    def _bias(rs):
+        e = [float(r["actual"]) - float(r["predicted"]) for r in rs
+             if r.get("predicted") and r.get("actual") not in ("", None)]
+        return (sum(e) / len(e), sum(abs(x) for x in e) / len(e)) if e else (None, None)
+
+    by_src = defaultdict(list)
+    for r in pit:
+        by_src[r.get("mu_source") or "unknown"].append(r)
+    if len(by_src) > 1 or "unknown" not in by_src:
+        print("\nBY PROJECTION SOURCE (bias is actual - predicted, in K)")
+        print(f"  {'source':<18} {'n':>4} {'stated':>7} {'realized':>9} "
+              f"{'bias':>7} {'MAE':>6} {'Brier':>7}")
+        for src in sorted(by_src, key=lambda s: -len(by_src[s])):
+            rs = by_src[src]
+            n, hit, pred = _rate(rs)
+            bias, mae = _bias(rs)
+            sp = [(float(r["model_p"]), r["result"] == "1") for r in rs]
+            br = sum((p - (1.0 if w else 0.0)) ** 2 for p, w in sp) / len(sp)
+            print(f"  {src:<18} {n:>4} {pred*100:>6.1f}% {hit*100:>8.1f}% "
+                  f"{bias:>+7.2f} {mae:>6.2f} {br:>7.4f}"
+                  if bias is not None else
+                  f"  {src:<18} {n:>4} {pred*100:>6.1f}% {hit*100:>8.1f}% "
+                  f"{'—':>7} {'—':>6} {br:>7.4f}")
+
+    # ---- bias by projection range: is a correction wrong at the extremes? ---
+    # A global mean can look unbiased while the slope is wrong, which is the
+    # damage a bad correction actually does — it compresses or inflates the
+    # spread between pitchers without moving the average.
+    withmu = [r for r in pit if r.get("predicted") and r.get("actual") not in ("", None)]
+    if len(withmu) >= 30:
+        srt = sorted(withmu, key=lambda r: float(r["predicted"]))
+        k = len(srt) // 3
+        print("\nBIAS BY PROJECTION RANGE (a slope error hides in the average)")
+        for tag, chunk in (("low  ", srt[:k]), ("mid  ", srt[k:2 * k]),
+                           ("high ", srt[2 * k:])):
+            if not chunk:
+                continue
+            b_, m_ = _bias(chunk)
+            mus = sum(float(r["predicted"]) for r in chunk) / len(chunk)
+            print(f"  {tag} mean mu {mus:5.2f}   bias {b_:+.2f} K   "
+                  f"MAE {m_:.2f}   (n={len(chunk)})")
+        lo_b = _bias(srt[:k])[0]
+        hi_b = _bias(srt[2 * k:])[0]
+        if lo_b is not None and hi_b is not None and abs(hi_b - lo_b) > 1.0:
+            print(f"  => low/high bias differ by {abs(hi_b-lo_b):.2f} K: the "
+                  f"SLOPE is off, not the level.\n     Re-fit per source "
+                  f"(calibration/fit_mean.py) rather than shifting the mean.")
+
     # ---- daily error analysis: biggest projection misses, latest slate -----
     if pit:
         last = max(r["date"] for r in pit)
@@ -241,9 +296,25 @@ def main() -> None:
                   f"line {r['line']:>4}  actual {r['actual']:>2}  "
                   f"({'lean correct' if r['result'] == '1' else 'lean wrong'})")
 
-    print("\n(pitcher drift at scale => re-fit the affine mean on FROZEN slates"
-          "\n (calibration/fit_mean.py); confidence spread returns when the weekly"
-          "\n calibration refit finds ranking skill)")
+    # ---- what is actually live right now -----------------------------------
+    # Constants no longer live only in git, so the daily report has to say what
+    # is serving. Otherwise "which correction produced this record?" becomes
+    # unanswerable the moment a refit promotes.
+    from projection import CORRECTIONS
+    from calibrate import GROUPS
+    from dispersion import DISPERSION_R
+    print(f"\nLIVE CONSTANTS  ({params.describe()})")
+    print("  mean correction  " + "   ".join(
+        f"{s}: {a:+.2f}{b:+.2f}mu" for s, (a, b) in sorted(CORRECTIONS.items())))
+    print(f"  calibration      pitcher: alpha={GROUPS['pitcher'][0]:+.3f} "
+          f"beta={GROUPS['pitcher'][1]:.2f}"
+          + ("   [beta=0 -> every row states the base rate; the confidence "
+             "ranking is OFF]" if GROUPS["pitcher"][1] == 0 else ""))
+    print(f"  dispersion       r={DISPERSION_R}")
+
+    print("\n(pitcher drift at scale => re-fit the mean PER SOURCE on FROZEN"
+          "\n slates (calibration/fit_mean.py); confidence spread returns when"
+          "\n the weekly calibration refit finds ranking skill)")
 
 
 if __name__ == "__main__":

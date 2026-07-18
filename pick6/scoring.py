@@ -58,16 +58,23 @@ def score_leg(leg: dict) -> dict:
     #                probability is about — never the mean or an anchor.
     # The displayed point prediction is always the raw projection.
     pm_raw = p_over(market, leg["lam"], leg["line"])
-    mu = corrected_mu(market, leg["lam"])
+    mu = corrected_mu(market, leg["lam"], leg.get("mu_source", "unknown"))
     pm = p_over(market, mu, leg["line"])
     side, p = ("more", pm) if pm >= 0.5 else ("less", 1.0 - pm)
+    # p_uncal is the probability calibrate() is ABOUT to be applied to. Logging
+    # it is what lets refit_calibration.py fit on the same quantity it will be
+    # applied to: it previously fitted on p_more_raw (from the UNcorrected mu)
+    # while production applied the result here, to the corrected one. beta=0
+    # hid that mismatch — a constant ignores its input — and it would have
+    # surfaced as systematic miscalibration the first time beta moved.
+    p_uncal = p
     cap = p_cap(market)
     if cap is not None and p > cap:
         p = cap                      # un-fitted dispersion: cap the confidence
     p = calibrate(market_group(market), p)
     pm = p if side == "more" else 1.0 - p
     return {**leg, "predicted": leg["lam"], "p_more": pm, "p_less": 1.0 - pm,
-            "side": side, "p": p, "p_more_raw": pm_raw}
+            "side": side, "p": p, "p_more_raw": pm_raw, "p_uncal": p_uncal}
 
 
 def rank_by_confidence(legs: list[dict]) -> list[dict]:

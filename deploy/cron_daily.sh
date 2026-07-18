@@ -79,10 +79,20 @@ fi
 "$PY" web/build_site.py "$DATE" "$REPO/web/dist/index.html"
 install -m 644 "$REPO/web/dist/index.html" "$WWW/index.html"
 
-# Publish fit reports as static files so constants can be reviewed from
-# anywhere. Weekly
-# (Sunday, once): the strikeout anchor-s refit with its confidence interval
-# on the full frozen archive (hits StatsAPI, so not every hour).
+# Weekly (Sunday, once) refits. REPORT-ONLY for now: both scripts print their
+# gate decision and change nothing. Adding --write makes them promote into
+# data/params.json when the gate passes (beats production on held-out Brier AND
+# log-loss; for the mean, also a b confidence interval excluding identity).
+#
+# Deliberately not enabled on first deploy: the gate has been tested on
+# synthetic data but never on the real graded log. Watch a few Sunday reports,
+# confirm it refuses and promotes when it should, THEN add --write to both
+# lines below. Everything else is already in place — pick6/params.py reads the
+# file, data/params.pinned.json outranks it, data/params_history/ makes every
+# promotion reversible.
+#
+# Both scripts are stdlib-only, so no ML dependency is needed on the host.
+# Reports are published as static files so the decisions stay reviewable.
 if [ "$(date +%u)" = "7" ] && [ ! -f "$REPO/data/.refit-$(date +%G-%V)" ]; then
     "$PY" calibration/fit_mean.py > "$REPO/web/dist/refit_s.txt" 2>&1 || true
     install -m 644 "$REPO/web/dist/refit_s.txt" "$WWW/refit_s.txt" 2>/dev/null || true
@@ -92,6 +102,8 @@ if [ "$(date +%u)" = "7" ] && [ ! -f "$REPO/data/.refit-$(date +%G-%V)" ]; then
 fi
 
 # housekeeping: dated backup of the record, prune backups older than 14 days.
+# grade.py now rewrites the log atomically (pick6/atomicio.py), so this is a
+# second line of defense rather than the only one.
 cp -f "$REPO/data/predictions_log.csv" "$REPO/data/predictions_log.$(date +%Y%m%d).bak" 2>/dev/null || true
 find "$REPO/data" \( -name 'predictions_log.*.bak' -o -name 'pick6_entries.*.bak' \) -mtime +14 -delete 2>/dev/null || true
 echo "=== published https://fantasy.perfecthold.online ==="

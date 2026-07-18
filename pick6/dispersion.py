@@ -15,5 +15,13 @@ un-capped batter baseline legs, not K dispersion. CAUTION: never fit r on
 stats (outcome leakage; it fit r->500, i.e. fake Poisson). Fit only on frozen
 lambdas: data/slates/<date>.csv (archive_slate.py) or live_settled.csv.
 """
+import params
+
 # NB size/dispersion. Var(Y) = mu * (1 + mu/r); r -> inf recovers Poisson.
-DISPERSION_R = 16.6
+_DEFAULT_R = 16.6
+
+# The upper bound is not arbitrary: a leaked fit (re-projecting past dates with
+# current season stats) drove r to 500 — i.e. fake Poisson, zero overdispersion
+# — which is the documented failure mode above. A learned r at the ceiling is a
+# leak, not a discovery, so refuse it and keep the fitted value.
+DISPERSION_R = params.scalar("dispersion_r", _DEFAULT_R, lo=2.0, hi=200.0)

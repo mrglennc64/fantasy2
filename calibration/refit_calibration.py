@@ -10,9 +10,21 @@ core projection model stays stable; only this calibration layer updates
 weekly — paste recommended constants into pick6/calibrate.py with
 provenance when the held-out comparison supports them.
 
-Uses raw_p_more (the uncalibrated engine probability) as the input p, so
-the fit is not distorted by whatever constants were live when a row was
-logged. Line-free: inputs are our stated probabilities and our outcomes.
+INPUT DOMAIN (fixed 2026-07-18). calibrate() is applied in scoring.py to the
+probability computed from the CORRECTED mu. This fit must therefore use that
+same quantity, logged as model_p_uncal — the chosen side's probability after
+the mean correction, before the cap, before calibrate() itself.
+
+It previously fitted on raw_p_more, which comes from the UNCORRECTED mu. Fit
+domain and apply domain were different distributions, and beta=0 hid it
+completely: a constant output ignores its input, so the mismatch could not
+show up in any diagnostic. It would have surfaced as systematic
+miscalibration the first time beta moved off zero.
+
+raw_p_more is still logged and still the uncorrected A/B track on the
+dashboard — it just isn't what this layer is fitted on. Rows predating
+model_p_uncal are skipped rather than silently mixed across the two domains.
+Line-free either way: inputs are our stated probabilities and our outcomes.
 """
 from __future__ import annotations
 
@@ -23,7 +35,11 @@ import sys
 from collections import defaultdict
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "pick6"))
+sys.path.insert(0, os.path.dirname(__file__))
 from calibrate import GROUPS  # noqa: E402
+
+import gate            # noqa: E402
+import params_io       # noqa: E402
 
 LOG = os.path.join(os.path.dirname(__file__), "..", "data", "predictions_log.csv")
 MIN_TRAIN = 60
@@ -57,18 +73,30 @@ def main() -> None:
     if not os.path.exists(LOG):
         print(f"no log at {LOG}")
         return
-    rows = [r for r in csv.DictReader(open(LOG, encoding="utf-8"))
-            if (r.get("market") or "strikeouts") == "strikeouts"
-            and r.get("result") in ("1", "0") and r.get("raw_p_more")]
+    graded = [r for r in csv.DictReader(open(LOG, encoding="utf-8"))
+              if (r.get("market") or "strikeouts") == "strikeouts"
+              and r.get("result") in ("1", "0")]
+    rows = [r for r in graded if r.get("model_p_uncal")]
     if not rows:
-        print("no graded pitcher rows with a raw probability yet.")
+        print(f"no graded pitcher rows carry model_p_uncal yet "
+              f"({len(graded)} graded rows predate it).")
+        print("This layer is fitted on the probability it is APPLIED to. Rows "
+              "logged\nbefore 2026-07-18 only have raw_p_more, from the "
+              "uncorrected mu — a\ndifferent distribution. Fitting across both "
+              "would be the same class of\nerror as pooling two estimators "
+              "into one mean correction. Wait for the\nlog to refill.")
         return
+    if len(graded) > len(rows):
+        print(f"NOTE: {len(graded) - len(rows)} graded rows predate "
+              f"model_p_uncal and are excluded\n(pre-2026-07-18 rows only have "
+              f"the uncorrected-mu probability).\n")
 
-    # engine-side p (uncalibrated): the chosen side's probability from raw_p_more
+    # The chosen side's probability from the CORRECTED mu — the exact quantity
+    # calibrate() will be applied to in production.
     def side_p(r) -> tuple[float, bool]:
-        praw = float(r["raw_p_more"])
-        p = praw if praw >= 0.5 else 1 - praw
-        won = ((float(r["actual"]) > float(r["line"])) == (praw >= 0.5))
+        p = float(r["model_p_uncal"])
+        side_more = r["side"] == "more"
+        won = ((float(r["actual"]) > float(r["line"])) == side_more)
         return p, won
 
     by_day = defaultdict(list)
@@ -106,9 +134,29 @@ def main() -> None:
     a_full, b_full = fit([o for v in by_day.values() for o in v])
     print(f"\nfull-sample fit: alpha={a_full:+.3f}  beta={b_full:.2f}"
           f"   (production: alpha={a_prod:+.3f}, beta={b_prod:.2f})")
-    print("=> update pick6/calibrate.py only if 'refit' beats 'production' on"
-          "\n   held-out Brier AND log-loss. beta>0 means confidence ranking has"
-          "\n   started carrying information — spread returns exactly then.")
+
+    ok, why = gate.promote(held["production"], held["refit"],
+                           n=n_all, days=len(dates))
+    if not ok:
+        print(f"\n=> KEEP production (gate: {why})")
+        return
+    print(f"\n=> PROMOTE pitcher: alpha={a_full:+.3f}, beta={b_full:.2f}  ({why})")
+    if b_full > 0 and b_prod == 0:
+        print("   beta leaves zero for the first time: the confidence ranking "
+              "has\n   started carrying information, so spread returns to the "
+              "board.")
+    if "--write" not in sys.argv:
+        print("   (report-only; re-run with --write to apply)")
+        return
+    path = params_io.update(
+        "calibration", {"pitcher": [round(a_full, 3), round(b_full, 2)]},
+        {"n": n_all, "days": len(dates), "fitted_on": "model_p_uncal",
+         "held_out_brier_production": gate.brier(held["production"]),
+         "held_out_brier_refit": gate.brier(held["refit"]),
+         "held_out_logloss_production": gate.logloss(held["production"]),
+         "held_out_logloss_refit": gate.logloss(held["refit"])},
+        written_by="calibration/refit_calibration.py")
+    print(f"   wrote {path}")
 
 
 if __name__ == "__main__":

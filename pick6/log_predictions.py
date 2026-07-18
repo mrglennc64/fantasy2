@@ -21,13 +21,12 @@ import json
 import os
 import sys
 
+import log_features
+from log_schema import FIELDS, ensure_schema
 from pick6_today import compute_board
 
 LOG = os.path.join(os.path.dirname(__file__), "..", "data", "predictions_log.csv")
 BOARDS = os.path.join(os.path.dirname(__file__), "..", "data", "boards")
-FIELDS = ["date", "player", "game", "market", "platform", "side", "line",
-          "predicted", "model_p", "raw_p_more", "rw_proj", "rw_agree",
-          "actual", "result"]
 
 
 def snapshot_path(date: str) -> str:
@@ -58,6 +57,9 @@ def already_logged(date: str) -> bool:
 
 def main() -> None:
     date = sys.argv[1] if len(sys.argv) > 1 else "2026-07-08"
+    # Before appending: a stale v1 header on disk would take 17-field rows
+    # silently misaligned rather than failing, so migrate first.
+    ensure_schema(LOG)
     if already_logged(date):
         print(f"{date} already logged in {LOG} — skipping (delete its rows to re-log).")
         return
@@ -81,16 +83,23 @@ def main() -> None:
             "rw_proj": "" if rw is None else f"{rw:.1f}",
             "rw_agree": {True: "1", False: "0", None: ""}[l.get("rw_agree")],
             "actual": "", "result": "",
+            "mu_source": l.get("mu_source", "unknown"),
+            "mu_version": l.get("mu_version", ""),
+            "model_p_uncal": (f"{l['p_uncal']:.4f}"
+                              if l.get("p_uncal") is not None else ""),
         })
 
     new = not os.path.exists(LOG)
     with open(LOG, "a", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=FIELDS)
+        w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
         if new:
             w.writeheader()
         w.writerows(rows)
     print(f"Logged {len(rows)} predictions for {date} -> {LOG}")
     print(f"Froze scored board -> {write_snapshot(date, res)}")
+    feat = log_features.write(date, legs)
+    if feat:
+        print(f"Froze serving features -> {feat}")
 
 
 if __name__ == "__main__":
