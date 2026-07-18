@@ -10,16 +10,25 @@ set -euo pipefail
 USER=fantasy
 REPO=/opt/fantasy
 WWW=/var/www/fantasy
-REPO_URL=https://github.com/mrglennc64/Fantasy.git
+REPO_URL=https://github.com/mrglennc64/fantasy2.git
 
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
 
 # 1. dedicated system user, no login shell
 id -u "$USER" >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin "$USER"
 
-# 2. repo owned by fantasy (fresh clone if missing)
+# 2. repo owned by fantasy (fresh clone if missing).
+# An EXISTING install keeps whatever origin it was cloned with, so re-running
+# this script must also correct the URL — otherwise a repo move silently leaves
+# the box pulling the old remote forever, which is invisible until someone
+# wonders why pushes never deploy.
 if [ -d "$REPO/.git" ]; then
     git config --global --add safe.directory "$REPO" || true
+    CUR="$(sudo -u "$USER" git -C "$REPO" remote get-url origin 2>/dev/null || echo)"
+    if [ "$CUR" != "$REPO_URL" ]; then
+        echo "repointing origin: $CUR -> $REPO_URL"
+        sudo -u "$USER" git -C "$REPO" remote set-url origin "$REPO_URL"
+    fi
 else
     rm -rf "$REPO"; git clone "$REPO_URL" "$REPO"
 fi
