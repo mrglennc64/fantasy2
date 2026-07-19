@@ -370,11 +370,30 @@ def fit_source(src: str, pairs: list[dict]) -> tuple[float, float]:
     if ok:
         print(f"\n  => PROMOTE {src}: mu' = {a:+.2f} + {b:.2f}*mu   ({why})")
         return (round(a, 2), round(b, 2))
-    print(f"\n  => IDENTITY for {src} (gate: {why})")
-    print("     This source keeps mu' = mu. It does NOT inherit another "
-          "source's\n     correction — that is the failure this gate exists to "
-          "prevent.")
-    return _pj.IDENTITY
+
+    # KEEP PRODUCTION, not identity. These are different things and conflating
+    # them cost real accuracy the first time this ran: mlbedge_slate had 173
+    # settled starts and a slope CI of [0.48, 0.68] — its affine is its OWN
+    # fit and clearly justified — but the gate refused on an unrelated
+    # condition (too few walk-forward days) and the old code reverted it to
+    # mu' = mu. Its own walk-forward said that was worse: 36.5% realized on
+    # raw vs 42.9% on the affine.
+    #
+    # IDENTITY is the DEFAULT for a source that has never been fitted, so it
+    # cannot inherit a foreign correction. A gate REFUSAL means "not enough
+    # evidence to change what is live" — which is an argument for leaving
+    # production alone, never for discarding a fit that was itself gated in.
+    print(f"\n  => KEEP PRODUCTION for {src}: mu' = {prod[0]:+.2f} + "
+          f"{prod[1]:.2f}*mu   (gate: {why})")
+    if tuple(prod) == _pj.IDENTITY:
+        print("     Production is identity, so this source stays uncorrected. "
+              "It does NOT\n     inherit another source's fit — that is the "
+              "failure this gate prevents.")
+    else:
+        print(f"     Not enough evidence to CHANGE the live correction; that "
+              f"is not\n     evidence to remove it. Full-sample fit was "
+              f"{a:+.2f} + {b:.2f}*mu for reference.")
+    return prod
 
 
 def main() -> None:
