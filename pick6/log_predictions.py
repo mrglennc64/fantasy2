@@ -87,6 +87,9 @@ def main() -> None:
             "mu_version": l.get("mu_version", ""),
             "model_p_uncal": (f"{l['p_uncal']:.4f}"
                               if l.get("p_uncal") is not None else ""),
+            "bench_proj": (f"{l['bench_proj']:.3f}"
+                           if l.get("bench_proj") is not None else ""),
+            "bench_source": l.get("bench_source", ""),
         })
 
     new = not os.path.exists(LOG)

@@ -79,7 +79,8 @@ def _project(b: dict, date: str, slate: dict) -> dict | None:
     mu = batter_project(b["name"], b["market"], season, b.get("slot"), date=date)
     if mu is None:
         return None
-    return {"mu": mu, "source": "statsapi_baseline", "version": "", "detail": None}
+    return {"mu": mu, "source": "statsapi_baseline", "version": "",
+            "detail": None, "bench_mu": None, "bench_source": ""}
 
 
 def compute_board(date: str) -> dict:
@@ -106,6 +107,8 @@ def compute_board(date: str) -> dict:
                                "platform": b["platform"], "lam": rec["mu"],
                                "mu_source": rec["source"],
                                "mu_version": rec["version"],
+                               "bench_proj": rec.get("bench_mu"),
+                               "bench_source": rec.get("bench_source", ""),
                                "_kfeat": rec["detail"]}))
     annotate(legs)  # RotoWire second opinion — displayed, never a filter
     legs.sort(key=lambda l: -l["p"])

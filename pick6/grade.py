@@ -261,6 +261,44 @@ def main() -> None:
                   f"  {src:<18} {n:>4} {pred*100:>6.1f}% {hit*100:>8.1f}% "
                   f"{'—':>7} {'—':>6} {br:>7.4f}")
 
+    # ---- HEAD-TO-HEAD: owned model vs the upstream benchmark ---------------
+    # The kmodel became the served projection on 2026-07-19 on structural
+    # grounds (only an owned model exposes its features, so only it can be
+    # improved). That reasoning is sound but it is not evidence, so this block
+    # exists to make the decision falsifiable on the same rows: identical
+    # starts, identical lines, identical outcomes, both projections scored.
+    # If the benchmark wins on MAE and side accuracy over a real sample, invert
+    # back — the argument for owning the model does not survive it being worse.
+    h2h = [r for r in pit if r.get("bench_proj") and r.get("actual") not in ("", None)
+           and r.get("mu_source") == "kmodel"]
+    if h2h:
+        def _side_ok(mu, r):
+            line = float(r["line"])
+            if float(r["actual"]) == line:
+                return None                      # push: no side to be right on
+            return (mu > line) == (float(r["actual"]) > line)
+
+        rows_ = []
+        for tag, get in (("owned kmodel", lambda r: float(r["predicted"])),
+                         ("mlb-edge bench", lambda r: float(r["bench_proj"]))):
+            errs = [float(r["actual"]) - get(r) for r in h2h]
+            sides = [_side_ok(get(r), r) for r in h2h]
+            dec = [s for s in sides if s is not None]
+            rows_.append((tag, sum(abs(e) for e in errs) / len(errs),
+                          sum(errs) / len(errs),
+                          (sum(1 for s in dec if s) / len(dec)) if dec else None,
+                          len(dec)))
+        print(f"\nHEAD-TO-HEAD on {len(h2h)} shared starts (same line, same outcome)")
+        print(f"  {'projection':<16} {'MAE':>6} {'bias':>7} {'side acc':>9} {'n':>5}")
+        for tag, mae, bias, acc, n in rows_:
+            a = f"{acc*100:8.1f}%" if acc is not None else f"{'—':>9}"
+            print(f"  {tag:<16} {mae:>6.2f} {bias:>+7.2f} {a} {n:>5}")
+        agree = sum(1 for r in h2h
+                    if (float(r["predicted"]) > float(r["line"]))
+                    == (float(r["bench_proj"]) > float(r["line"])))
+        print(f"  the two agree on side for {agree}/{len(h2h)} starts "
+              f"({100*agree/len(h2h):.0f}%) — disagreements are where this matters")
+
     # ---- bias by projection range: is a correction wrong at the extremes? ---
     # A global mean can look unbiased while the slope is wrong, which is the
     # damage a bad correction actually does — it compresses or inflates the

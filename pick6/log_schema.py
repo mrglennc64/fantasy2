@@ -33,13 +33,20 @@ import os
 
 import atomicio
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _V1 = ["date", "player", "game", "market", "platform", "side", "line",
        "predicted", "model_p", "raw_p_more", "rw_proj", "rw_agree",
        "actual", "result"]
 
-FIELDS = _V1 + ["mu_source", "mu_version", "model_p_uncal"]
+_V2 = _V1 + ["mu_source", "mu_version", "model_p_uncal"]
+
+# v3 (2026-07-19): the owned kmodel became the served projection and mlb-edge
+# became a benchmark. bench_proj is what the upstream said for the SAME start,
+# recorded so the head-to-head is answerable from the record rather than from
+# an opinion — the same standing rw_proj has. Blank when upstream had no
+# projection, or when upstream itself served the row (nothing to compare).
+FIELDS = _V2 + ["bench_proj", "bench_source"]
 
 # Last date the mlb-edge upstream served projections. From 2026-07-13 the feed
 # chain could fall through to the owned kmodel (commit 40ab36d), so rows from
@@ -63,12 +70,12 @@ def legacy_source(date: str) -> str:
 
 
 def backfill(rows: list[dict]) -> list[dict]:
-    """Fill schema-v2 columns on rows read from an older file. In place."""
+    """Fill later-schema columns on rows read from an older file. In place."""
     for r in rows:
         if not r.get("mu_source"):
             r["mu_source"] = legacy_source(r.get("date", ""))
-        r.setdefault("mu_version", "")
-        r.setdefault("model_p_uncal", "")
+        for c in ("mu_version", "model_p_uncal", "bench_proj", "bench_source"):
+            r.setdefault(c, "")
     return rows
 
 

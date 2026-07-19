@@ -162,6 +162,10 @@ def render(date, res, tr, today=None, gen="", frozen=None, next_slate=None):
         praw_txt = f"{praw*100:.1f}%" if praw is not None else "—"
         pred = l.get('predicted', l['lam'])
         corr = corrected_mu(l["market"], pred, l.get("mu_source", "unknown"))
+        # Upstream benchmark: displayed for comparison, never served, never a
+        # filter — the same standing RotoWire has.
+        bench = l.get("bench_proj")
+        bench_txt = f"{bench:.2f}" if bench is not None else "—"
         leg_rows += (f"<tr data-side='{grp}'><td>{l['name']}</td>"
                      f"<td><span class=pill>{mkt}</span></td><td>{l.get('game','')}</td>"
                      f"<td class='n'>{pred:.2f}</td><td class='n'>{corr:.2f}</td>"
@@ -170,7 +174,8 @@ def render(date, res, tr, today=None, gen="", frozen=None, next_slate=None):
                      f"<td><span class=pill>{tier(_p(l))}</span></td>"
                      f"<td class='n'>{praw_txt}</td>"
                      f"<td class='n'>{l['line']}</td><td class='n'>{corr - l['line']:+.2f}</td>"
-                     f"<td class='n'>{rwp}</td><td>{agree}</td></tr>")
+                     f"<td class='n'>{rwp}</td><td>{agree}</td>"
+                     f"<td class='n'>{bench_txt}</td></tr>")
 
     def _cal_txt(c):
         return (f"stated {c[1]*100:.1f}% vs realized {c[2]*100:.1f}% "
@@ -217,7 +222,7 @@ def render(date, res, tr, today=None, gen="", frozen=None, next_slate=None):
 
 <div class=card><h2>Full board — every pitcher scored</h2>
 <table id=legtbl style="margin-top:12px">
-<tr><th>player</th><th>prop</th><th>game</th><th class=n>predicted</th><th class=n>corrected</th><th class=n>P(more)</th><th>lean</th><th class=n>P</th><th>tier</th><th class=n>raw P(more)</th><th class=n>ref line</th><th class=n>deviation</th><th class=n>RW proj</th><th>RW</th></tr>
+<tr><th>player</th><th>prop</th><th>game</th><th class=n>predicted</th><th class=n>corrected</th><th class=n>P(more)</th><th>lean</th><th class=n>P</th><th>tier</th><th class=n>raw P(more)</th><th class=n>ref line</th><th class=n>deviation</th><th class=n>RW proj</th><th>RW</th><th class=n>bench</th></tr>
 {leg_rows}</table><div style="margin-top:8px;color:var(--mut);font-size:12px">RW = RotoWire independent projection: = same lean · ≠ opposite lean. Probabilities are computed line-free: affine-corrected mean, fitted dispersion, and a calibration layer fitted on this system's own graded history. The reference line is shown for comparison only; the lean and deviation both follow the corrected mean, so they always agree.</div></div>
 
 <div class="card" style="color:var(--mut);font-size:13px">Statistical projections with quantified uncertainty, graded daily against official MLB results above. Point predictions are raw model output; probabilities reflect only what settled data has supported.</div>
