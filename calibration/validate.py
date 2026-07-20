@@ -45,6 +45,7 @@ from datetime import date as _date
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "pick6"))
 from dispersion import DISPERSION_R                      # noqa: E402
+from markets import over_threshold                       # noqa: E402
 from feed import norm                                    # noqa: E402
 from kmodel_params import COEF, FEATURES, INTERCEPT, MEAN, PARKS, SD  # noqa: E402
 
@@ -64,8 +65,8 @@ def nb_pmf(k: int, mu: float, r: float = DISPERSION_R) -> float:
 
 
 def p_over(mu: float, line: float) -> float:
-    """P(K > line) for a half-integer line."""
-    return max(0.0, 1.0 - sum(nb_pmf(i, mu) for i in range(math.ceil(line))))
+    """P(K > line), whole or half. Threshold must match production exactly."""
+    return max(0.0, 1.0 - sum(nb_pmf(i, mu) for i in range(over_threshold(line))))
 
 
 def spearman(xs: list[float], ys: list[float]) -> float:

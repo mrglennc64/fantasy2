@@ -23,7 +23,7 @@ import sys
 from collections import defaultdict
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "pick6"))
-from markets import MARKETS, p_over  # noqa: E402
+from markets import MARKETS, over_threshold, p_over  # noqa: E402
 
 LOG = os.path.join(os.path.dirname(__file__), "..", "data", "predictions_log.csv")
 MIN_TRAIN = 60
@@ -53,7 +53,7 @@ def fit_r(pairs: list[tuple[float, int]]) -> float:
 
 
 def p_more_nb(mu: float, line: float, r: float) -> float:
-    need = math.ceil(line)
+    need = over_threshold(line)
     cdf = sum(math.exp(nb_logpmf(i, mu, r)) for i in range(need))
     return max(0.0, min(1.0, 1.0 - cdf))
 

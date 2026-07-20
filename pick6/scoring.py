@@ -23,7 +23,7 @@ import math
 
 from calibrate import calibrate
 from dispersion import DISPERSION_R
-from markets import market_side as market_group, p_cap, p_over
+from markets import market_side as market_group, over_threshold, p_cap, p_over
 from projection import corrected_mu
 
 _EPS = 1e-9
@@ -37,11 +37,11 @@ def nb_pmf(k: int, mu: float, r: float = DISPERSION_R) -> float:
 
 
 def p_more(lam: float, line: float, r: float = DISPERSION_R) -> float:
-    """P(strikeouts > line) for a half-integer line under NB(mean=lam, size=r).
+    """P(strikeouts > line) under NB(mean=lam, size=r). Any line, whole or half.
 
-    More wins on K >= ceil(line); e.g. line 5.5 -> More needs K >= 6.
+    More wins on K >= over_threshold(line); e.g. 5.5 -> K >= 6, 6.0 -> K >= 7.
     """
-    need = math.ceil(line)
+    need = over_threshold(line)
     return max(0.0, 1.0 - sum(nb_pmf(i, lam, r) for i in range(need)))
 
 

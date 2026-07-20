@@ -79,15 +79,34 @@ def p_cap(market: str) -> float | None:
     return BASELINE_P_CAP if confidence(market) == "baseline" else None
 
 
-def p_over(market: str, mu: float, line: float) -> float:
-    """P(stat > line) for a half-integer line, per the market's distribution.
+def over_threshold(line: float) -> int:
+    """Smallest integer stat that beats `line` — the CANONICAL Over threshold.
 
-    Over wins on stat >= ceil(line); e.g. line 5.5 -> Over needs >= 6.
+    Over wins on stat > line, strictly. For a half-integer line that is
+    ceil(line): 5.5 -> 6. For a WHOLE-NUMBER line it is not — ceil(6.0) is 6,
+    but 6 K against a 6.0 line is a PUSH, not an Over. floor(line) + 1 is
+    correct for both: 5.5 -> 6, 6.0 -> 7.
+
+    2026-07-20: ceil() was used here and in eight other places. Boards do carry
+    whole-number lines (the 07-19 slate had six), so every one of them counted
+    the push mass as Over — overstating P(more) by exactly pmf(line) and
+    FLIPPING the published lean on three of those six rows. Any new P(over)
+    must call this rather than re-deriving the threshold; that is what the
+    duplication cost. Pushes themselves are a grading concern (grade.py),
+    already handled there since 58ce7a6.
+    """
+    return math.floor(line) + 1
+
+
+def p_over(market: str, mu: float, line: float) -> float:
+    """P(stat > line) per the market's distribution. Any line, whole or half.
+
+    Over wins on stat >= over_threshold(line); e.g. 5.5 -> >= 6, 6.0 -> >= 7.
     """
     spec = MARKETS.get(market)
     if spec is None:
         raise ValueError(f"unknown market {market!r}")
-    need = math.ceil(line)
+    need = over_threshold(line)
     if spec["dist"] == "nb":
         cdf = sum(_nb_pmf(i, mu, spec["r"]) for i in range(need))
     else:

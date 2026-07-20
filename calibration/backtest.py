@@ -28,7 +28,7 @@ def pois_pmf(k, lam):
 
 
 def p_more(lam, line):
-    need = math.ceil(line)
+    need = math.floor(line) + 1   # see markets.over_threshold (canonical)
     return 1.0 - sum(pois_pmf(i, lam) for i in range(need))
 
 
