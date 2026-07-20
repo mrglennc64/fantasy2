@@ -36,6 +36,7 @@ from collections import defaultdict
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "pick6"))
 sys.path.insert(0, os.path.dirname(__file__))
 from dispersion import DISPERSION_R                          # noqa: E402
+from markets import over_threshold                           # noqa: E402
 from grade import final_stats                                # noqa: E402
 from feed import norm                                        # noqa: E402
 from log_schema import SRC_LEGACY, SRC_UNKNOWN, legacy_source  # noqa: E402
@@ -56,7 +57,10 @@ def nb_logpmf(k: int, mu: float, r: float = DISPERSION_R) -> float:
 
 
 def p_more(mu: float, line: float) -> float:
-    need = math.ceil(line)
+    # over_threshold, not ceil: a whole-number line pushes on equality, so More
+    # needs line+1 there. Must match production (markets.p_over) exactly or the
+    # affine fitted here is fitted against a different question than it serves.
+    need = over_threshold(line)
     cdf = sum(math.exp(nb_logpmf(i, mu)) for i in range(need))
     return max(0.0, min(1.0, 1.0 - cdf))
 

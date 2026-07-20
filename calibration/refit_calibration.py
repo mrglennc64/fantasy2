@@ -40,6 +40,7 @@ from calibrate import GROUPS  # noqa: E402
 
 import gate            # noqa: E402
 import params_io       # noqa: E402
+from threshold_repair import repair_row  # noqa: E402
 
 LOG = os.path.join(os.path.dirname(__file__), "..", "data", "predictions_log.csv")
 MIN_TRAIN = 60
@@ -93,9 +94,16 @@ def main() -> None:
 
     # The chosen side's probability from the CORRECTED mu — the exact quantity
     # calibrate() will be applied to in production.
+    #
+    # Rows served before 2026-07-20 on a WHOLE-NUMBER line carry an inflated
+    # P(more): the old threshold counted the push as a win. Repairing them here
+    # (not in the log) keeps the served record honest while stopping the fit
+    # from re-learning the push mass. Half-integer rows pass through untouched.
+    # See threshold_repair.py for why this inverts rather than recomputes.
     def side_p(r) -> tuple[float, bool]:
-        p = float(r["model_p_uncal"])
-        side_more = r["side"] == "more"
+        side, p, _ = repair_row(r["side"], float(r["model_p_uncal"]),
+                                float(r["line"]))
+        side_more = side == "more"
         won = ((float(r["actual"]) > float(r["line"])) == side_more)
         return p, won
 

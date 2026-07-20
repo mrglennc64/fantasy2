@@ -22,7 +22,7 @@ BINS = [(0.50, 0.55), (0.55, 0.60), (0.60, 0.65), (0.65, 0.70),
 
 
 def pois_p_more(mu, line):
-    need = math.ceil(line)
+    need = math.floor(line) + 1   # see markets.over_threshold (canonical)
     return 1.0 - sum(math.exp(-mu) * mu ** i / math.factorial(i) for i in range(need))
 
 

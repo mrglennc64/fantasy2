@@ -38,6 +38,7 @@ from sklearn.linear_model import PoissonRegressor
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "pick6"))
 from feed import norm                                        # noqa: E402
+from markets import over_threshold                           # noqa: E402
 from nb import fit_dispersion                                # noqa: E402
 from fit_mean import fit_anchor, anchor_ci, nb_logpmf        # noqa: E402
 
@@ -246,7 +247,7 @@ def main() -> None:
         for p in pairs:
             mu_s = p["line"] + s * (p["mu"] - p["line"])
             pm = 1.0 - sum(math.exp(nb_logpmf(i, mu_s, r_new))
-                           for i in range(math.ceil(p["line"])))
+                           for i in range(over_threshold(p["line"])))
             side_more = pm >= 0.5
             if p["actual"] == p["line"]:
                 continue

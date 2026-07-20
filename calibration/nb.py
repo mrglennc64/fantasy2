@@ -28,8 +28,13 @@ def nb_pmf(k: int, mu: float, r: float) -> float:
 
 
 def nb_p_more(mu: float, line: float, r: float) -> float:
-    """P(K > line) = P(K >= ceil(line)) under NB(mu, r)."""
-    need = math.ceil(line)
+    """P(K > line) = P(K >= floor(line)+1) under NB(mu, r).
+
+    floor+1, not ceil: whole-number lines push on equality (see
+    markets.over_threshold, the canonical definition). Kept inline here only
+    because this module is deliberately dependency-free pure math.
+    """
+    need = math.floor(line) + 1
     cdf = sum(nb_pmf(i, mu, r) for i in range(need))
     return max(0.0, 1.0 - cdf)
 
