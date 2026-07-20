@@ -25,3 +25,4 @@ data/features/
 data/params.json
 data/params.json.tmp
 data/params_history/
+data/retrosheet/
