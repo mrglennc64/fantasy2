@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import sys
 import urllib.parse
 import urllib.request
 from datetime import date as _date
@@ -42,6 +43,43 @@ _LG_KBF = 0.22
 _PRIOR_BF = 150.0
 
 
+def _warn(what: str, exc: BaseException, schema: bool = False) -> None:
+    """One line to stderr; the hourly cron log keeps it (deploy/fantasy.logrotate).
+
+    Every degradation in this module is silent by design — a missing feature
+    falls back to its training mean and a real number still comes back. That
+    keeps the board alive when StatsAPI wobbles, but it also means a PERMANENT
+    break (an endpoint renamed, a field retyped) looks exactly like a slow
+    afternoon: projections quietly built on training means for every pitcher,
+    with nothing anywhere saying so.
+
+    So the fallback stays, and the failure gets said out loud. `schema=True`
+    marks the kind that will not fix itself — a network blip repeats a few times
+    an hour, a schema break repeats forever and needs a human.
+    """
+    kind = "SCHEMA" if schema else "fetch"
+    print(f"kmodel: {kind} {what}: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+
+def _expect(payload: dict, key: str, what: str) -> bool:
+    """True if `key` is present. Warns and returns False if the shape changed.
+
+    The parsing below is written in defensive .get(x, default) chains, so a
+    renamed endpoint or retyped field raises NOTHING — it returns an empty
+    result that is indistinguishable from a quiet news day. That is why the
+    except-clauses alone could never surface a schema break: there was no
+    exception to catch. Asserting the top-level key we depend on separates
+    "no data" (legitimate: empty list, no games yet) from "not the response we
+    were promised" (a break that will never fix itself).
+    """
+    if isinstance(payload, dict) and key in payload:
+        return True
+    got = sorted(payload)[:6] if isinstance(payload, dict) else type(payload).__name__
+    print(f"kmodel: SCHEMA {what}: no {key!r} in response (got {got})",
+          file=sys.stderr)
+    return False
+
+
 def _get(url):
     with urllib.request.urlopen(url, timeout=45) as r:
         return json.load(r)
@@ -60,10 +98,19 @@ def _player_id(name: str) -> int | None:
     try:
         s = _get("https://statsapi.mlb.com/api/v1/people/search?names="
                  + urllib.parse.quote(name))
+    except Exception as e:
+        _warn(f"player search {name!r}", e)
+        _pid_cache[key] = None
+        return None
+    if not _expect(s, "people", f"people/search for {name!r}"):
+        _pid_cache[key] = None
+        return None
+    try:
         ppl = s.get("people", [])
         pid = next((p["id"] for p in ppl if norm(p.get("fullName", "")) == key),
                    ppl[0]["id"] if ppl else None)
-    except Exception:
+    except Exception as e:
+        _warn(f"people/search shape for {name!r}", e, schema=True)
         pid = None
     _pid_cache[key] = pid
     return pid
@@ -77,6 +124,14 @@ def _schedule(date: str) -> dict:
     try:
         s = _get("https://statsapi.mlb.com/api/v1/schedule?sportId=1&date="
                  + date + "&hydrate=probablePitcher,team")
+    except Exception as e:
+        _warn(f"schedule {date}", e)
+        _sched_cache[date] = out
+        return out
+    if not _expect(s, "dates", f"schedule {date}"):
+        _sched_cache[date] = out
+        return out
+    try:
         for d in s.get("dates", []):
             for g in d.get("games", []):
                 home, away = g["teams"]["home"], g["teams"]["away"]
@@ -88,8 +143,12 @@ def _schedule(date: str) -> dict:
                             "team": side["team"]["id"],
                             "opp": other["team"]["id"],
                             "home": is_home, "venue": habbr}
-    except Exception:
-        pass
+    except Exception as e:
+        # Partial `out` is kept deliberately: the pitchers parsed before the
+        # break are still correct, and every one missing degrades to feature
+        # means rather than vanishing from the board.
+        _warn(f"schedule shape for {date} ({len(out)} parsed before break)",
+              e, schema=True)
     _sched_cache[date] = out
     return out
 
@@ -101,11 +160,23 @@ def _team_k_pa(team_id: int, season: int) -> float | None:
     try:
         st = _get(f"https://statsapi.mlb.com/api/v1/teams/{team_id}/stats"
                   f"?season={season}&group=hitting&stats=season")
-        s = st.get("stats", [{}])[0].get("splits", [{}])[0].get("stat", {})
+    except Exception as e:
+        _warn(f"team {team_id} hitting stats", e)
+        _teamk_cache[ck] = None
+        return None
+    if not _expect(st, "stats", f"team {team_id} hitting stats"):
+        _teamk_cache[ck] = None
+        return None
+    try:
+        # `or [{}]`, not a .get default: the key EXISTS and is an empty list for
+        # a team with no games logged yet. A default only fires on a missing key.
+        s = (st.get("stats") or [{}])[0]
+        s = (s.get("splits") or [{}])[0].get("stat", {})
         k = float(s.get("strikeOuts", 0) or 0)
         pa = float(s.get("plateAppearances", 0) or 0)
         v = (k + 50 * _LG_KBF) / (pa + 50) if pa else None
-    except Exception:
+    except Exception as e:
+        _warn(f"team stats shape for {team_id}", e, schema=True)
         v = None
     _teamk_cache[ck] = v
     return v
@@ -119,7 +190,15 @@ def _starts(pid: int, season: int) -> list[dict]:
     try:
         st = _get(f"https://statsapi.mlb.com/api/v1/people/{pid}/stats"
                   f"?stats=gameLog&group=pitching&season={season}")
-        for spl in st.get("stats", [{}])[0].get("splits", []):
+    except Exception as e:
+        _warn(f"gameLog for pitcher {pid}", e)
+        _log_cache[pid] = rows
+        return rows
+    if not _expect(st, "stats", f"gameLog for pitcher {pid}"):
+        _log_cache[pid] = rows
+        return rows
+    try:
+        for spl in (st.get("stats") or [{}])[0].get("splits") or []:
             s = spl.get("stat", {})
             if int(s.get("gamesStarted", 0) or 0) < 1:
                 continue
@@ -127,8 +206,8 @@ def _starts(pid: int, season: int) -> list[dict]:
                          "K": float(s.get("strikeOuts", 0) or 0),
                          "BF": float(s.get("battersFaced", 0) or 0)})
         rows.sort(key=lambda r: r["date"] or "")
-    except Exception:
-        pass
+    except Exception as e:
+        _warn(f"gameLog shape for pitcher {pid}", e, schema=True)
     _log_cache[pid] = rows
     return rows
 
