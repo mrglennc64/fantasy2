@@ -21,10 +21,11 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import sys
 import urllib.parse
 import urllib.request
-from datetime import date as _date
+from datetime import date as _date, timedelta as _timedelta
 
 from feed import norm
 from kmodel_params import COEF, FEATURES, INTERCEPT, MEAN, PARKS, SD
@@ -117,13 +118,14 @@ def _player_id(name: str) -> int | None:
 
 
 def _schedule(date: str) -> dict:
-    """norm(probable) -> {team_id, opp_id, home, venue_abbr}."""
+    """norm(probable) -> {team_id, opp_id, home, venue_abbr, game_utc,
+    opp_lineup (batter ids, [] until the confirmed lineup posts)}."""
     if date in _sched_cache:
         return _sched_cache[date]
     out: dict[str, dict] = {}
     try:
         s = _get("https://statsapi.mlb.com/api/v1/schedule?sportId=1&date="
-                 + date + "&hydrate=probablePitcher,team")
+                 + date + "&hydrate=probablePitcher,team,lineups")
     except Exception as e:
         _warn(f"schedule {date}", e)
         _sched_cache[date] = out
@@ -136,13 +138,21 @@ def _schedule(date: str) -> dict:
             for g in d.get("games", []):
                 home, away = g["teams"]["home"], g["teams"]["away"]
                 habbr = home["team"].get("abbreviation") or home["team"]["name"]
-                for side, other, is_home in ((home, away, True), (away, home, False)):
+                lus = g.get("lineups") or {}
+                for side, other, is_home, opp_lu in (
+                        (home, away, True, "awayPlayers"),
+                        (away, home, False, "homePlayers")):
                     pp = side.get("probablePitcher") or {}
                     if pp.get("fullName"):
                         out[norm(pp["fullName"])] = {
                             "team": side["team"]["id"],
                             "opp": other["team"]["id"],
-                            "home": is_home, "venue": habbr}
+                            "home": is_home, "venue": habbr,
+                            "game_utc": g.get("gameDate", ""),
+                            # The batters this pitcher will actually face —
+                            # empty until the opposing manager posts a lineup.
+                            "opp_lineup": [p["id"] for p in
+                                           (lus.get(opp_lu) or [])[:9]]}
     except Exception as e:
         # Partial `out` is kept deliberately: the pitchers parsed before the
         # break are still correct, and every one missing degrades to feature
@@ -219,6 +229,61 @@ def _kbf(h: list[dict], last: int | None) -> float:
     return (k + _PRIOR_BF * _LG_KBF) / (bf + _PRIOR_BF)
 
 
+# ---- confirmed-lineup K%: the serve-time half of the backfill feature -------
+# Constants and construction MUST mirror calibration/backfill_lineups.py, which
+# builds the training rows: shrunk (K + 50*0.22)/(PA + 50) per batter, season
+# to date as of the day BEFORE the game, simple mean over the posted nine.
+# Diverging here recreates the train/serve mismatch this exists to close.
+_PRIOR_PA = 50.0
+_BK_CACHE = os.path.join(os.path.dirname(__file__), "..", "data",
+                         ".batter_k_cache.json")
+_bk_cache: dict[str, float | None] | None = None
+_MIN_LINEUP = 5    # fewer resolved batters than this -> fall back to team
+
+
+def _batter_k(pid: int, date: str) -> float | None:
+    """Shrunk season-to-date K/PA for a batter, as of the day before `date`.
+    Weekly cache, persisted to the same file the backfill uses — serve time
+    warms the cache the next backfill run reads."""
+    global _bk_cache
+    if _bk_cache is None:
+        try:
+            with open(_BK_CACHE, encoding="utf-8") as f:
+                _bk_cache = json.load(f)
+        except Exception:
+            _bk_cache = {}
+    d = _date.fromisoformat(date)
+    key = f"{pid}:{d.isocalendar()[0]}-{d.isocalendar()[1]}"
+    if key in _bk_cache:
+        return _bk_cache[key]
+    end = (d - _timedelta(days=1)).isoformat()
+    try:
+        st = _get(f"https://statsapi.mlb.com/api/v1/people/{pid}/stats"
+                  f"?stats=byDateRange&group=hitting&season={d.year}"
+                  f"&startDate={d.year}-03-01&endDate={end}")
+        splits = (st.get("stats") or [{}])[0].get("splits") or []
+        s = splits[0]["stat"] if splits else {}
+        k = float(s.get("strikeOuts", 0) or 0)
+        pa = float(s.get("plateAppearances", 0) or 0)
+        v = (k + _PRIOR_PA * _LG_KBF) / (pa + _PRIOR_PA)
+    except Exception as e:
+        _warn(f"batter {pid} K rate", e)
+        v = None
+    _bk_cache[key] = v
+    try:                                   # best-effort persist; cache is a cache
+        with open(_BK_CACHE, "w", encoding="utf-8") as f:
+            json.dump(_bk_cache, f)
+    except Exception:
+        pass
+    return v
+
+
+def _lineup_k_pa(batter_ids: list[int], date: str) -> float | None:
+    """Mean shrunk K/PA of the posted lineup, or None if too few resolve."""
+    ks = [k for k in (_batter_k(b, date) for b in batter_ids) if k is not None]
+    return sum(ks) / len(ks) if len(ks) >= _MIN_LINEUP else None
+
+
 def project_detail(name: str, date: str) -> dict | None:
     """Projection plus the exact inputs it was computed from, or None if the
     starter has fewer than 2 prior starts this season (no form to project from).
@@ -228,6 +293,12 @@ def project_detail(name: str, date: str) -> dict | None:
     failed scores as a league-average matchup and looks like a normal
     projection. Surfacing it here is what lets the feature sidecar detect
     serving-vs-training drift instead of it hiding in the residuals.
+
+    `lineup_used` says which variable filled opp_k_pct: the posted lineup's
+    mean batter K% (True) or the team-season rate (False). The distinction is
+    the entire point of logging a row only after its lineup posts — a lineup
+    value carries information that did not exist when the reference line was
+    set; the team value existed all along.
     """
     pid = _player_id(name)
     if pid is None:
@@ -237,7 +308,13 @@ def project_detail(name: str, date: str) -> dict | None:
     if len(h) < 2:
         return None
     sched = _schedule(date).get(norm(name), {})
-    opp_k = _team_k_pa(sched["opp"], season) if sched.get("opp") else None
+    opp_k = None
+    lineup_used = False
+    if sched.get("opp_lineup"):
+        opp_k = _lineup_k_pa(sched["opp_lineup"], date)
+        lineup_used = opp_k is not None
+    if opp_k is None and sched.get("opp"):
+        opp_k = _team_k_pa(sched["opp"], season)
     rest = None
     if h[-1]["date"]:
         rest = (_date.fromisoformat(date) - _date.fromisoformat(h[-1]["date"])).days
@@ -259,7 +336,8 @@ def project_detail(name: str, date: str) -> dict | None:
         z += c * (x - m) / s
     return {"mu": math.exp(z), "features": feats, "imputed": imputed,
             "pid": pid, "venue": sched.get("venue"), "team": sched.get("team"),
-            "opp": sched.get("opp"), "version": VERSION}
+            "opp": sched.get("opp"), "version": VERSION,
+            "lineup_used": lineup_used, "game_utc": sched.get("game_utc", "")}
 
 
 def project(name: str, date: str) -> float | None:

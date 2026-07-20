@@ -55,41 +55,65 @@ FEATURES = ["roll_kbf_3", "roll_kbf_10", "prior_kbf", "roll_bf_3",
 
 
 def load_starts() -> list[dict]:
-    """Started outings with the features the SERVER can build. Team-level
-    opp_k_pct only.
+    """Started outings, opp_k_pct defined EXACTLY as the server defines it:
+    confirmed-lineup mean batter K% when the lineup is known, team-season rate
+    otherwise.
 
-    2026-07-20: this used to substitute confirmed-lineup `lineup_k_pct` into
-    the `opp_k_pct` slot whenever data/lineups_backfill.csv had it, and to add
-    backfill-only starts on that same substituted feature. kmodel.project()
-    has always served team-level opp_k_pct, so one column name covered two
-    different variables:
+    History of this function, because it has flipped twice and must not flip
+    again silently:
 
-        lineup_k_pct    2,914 rows   mean 0.2191   SD 0.0138
-        opp_k_pct      11,796 rows   mean 0.2231   SD 0.0246
+    2026-07-20 morning: the lineup substitution was REMOVED. kmodel.project()
+    could only build the team-level rate, so training on lineup_k_pct (SD
+    0.0138) while serving opp_k_pct (SD 0.0246) mis-scaled the coefficient on
+    every published projection — 0.0157 K of held-out MAE, bias -0.101 ->
+    -0.160 (calibration/experiment_trainserve.py).
 
-    The served variable has 1.8x the spread of the one 18% of training rows
-    carried. Standardisation is fitted on the training blend and applied to the
-    wider served variable, so the coefficient lands mis-scaled on every
-    published projection — costing 0.0157 K of held-out MAE and pushing bias
-    from -0.101 to -0.160 (calibration/experiment_trainserve.py). The matching
-    column name is precisely why nothing ever reported it.
-
-    Dropping the substitution costs 12 training rows and is measurably better
-    than the mismatch it replaces. It is NOT the best available answer: serving
-    lineup_k_pct is worth ~0.9% of MAE, six times more. That needs a live
-    lineup fetch in kmodel.py and is roadmap Phase A option 1. Until then,
-    train on what can be served.
+    2026-07-20 later: the substitution is RESTORED, because the other half
+    shipped: kmodel.project_detail() now fetches the posted lineup
+    (schedule?hydrate=lineups) and builds the same shrunk mean batter K% at
+    serve time, falling back to the team rate with lineup_used=False. Train
+    chain and serve chain are now the same definition, so training on the
+    finer variable is parity, not mismatch. The rule being honoured is
+    unchanged both times: train on what you can serve.
     """
-    rows = []
+    lineup: dict[tuple[str, str], dict] = {}
+    if os.path.exists(BACKFILL):
+        for r in csv.DictReader(open(BACKFILL, encoding="utf-8")):
+            if r.get("lineup_k_pct"):
+                lineup[(r["date"], str(r["pitcher_id"]))] = r
+
+    rows, seen = [], set()
     for r in csv.DictReader(open(LOGS, encoding="utf-8")):
         try:
+            key = (r["date"], str(r["pitcher_id"]))
+            bf = lineup.get(key)
             rows.append({
                 "date": r["date"], "pitcher": r["pitcher"],
                 "pid": r["pitcher_id"], "K": int(float(r["K"])),
                 "BF": float(r["BF"]), "pitches": float(r["pitches"] or 0),
-                "opp_k_pct": float(r["opp_k_pct"]),
+                # lineup-level K% when backfilled, team-level otherwise —
+                # the same fallback chain project_detail() runs at serve time
+                "opp_k_pct": (float(bf["lineup_k_pct"]) if bf
+                              else float(r["opp_k_pct"])),
                 "is_home": 1.0 if r["is_home"] == "True" else 0.0,
                 "venue": r["team"] if r["is_home"] == "True" else r["opponent"],
+            })
+            seen.add(key)
+        except (KeyError, ValueError):
+            continue
+    # backfill-only starts (after the gamelog cutoff)
+    for key, r in lineup.items():
+        if key in seen:
+            continue
+        try:
+            home = str(r["is_home"]) == "True"
+            rows.append({
+                "date": r["date"], "pitcher": r["pitcher"], "pid": r["pitcher_id"],
+                "K": int(float(r["K"])), "BF": float(r["BF"]),
+                "pitches": float(r["pitches"] or 0),
+                "opp_k_pct": float(r["lineup_k_pct"]),
+                "is_home": 1.0 if home else 0.0,
+                "venue": r["team"] if home else r["opponent"],
             })
         except (KeyError, ValueError):
             continue

@@ -33,7 +33,7 @@ import os
 
 import atomicio
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _V1 = ["date", "player", "game", "market", "platform", "side", "line",
        "predicted", "model_p", "raw_p_more", "rw_proj", "rw_agree",
@@ -46,7 +46,16 @@ _V2 = _V1 + ["mu_source", "mu_version", "model_p_uncal"]
 # recorded so the head-to-head is answerable from the record rather than from
 # an opinion — the same standing rw_proj has. Blank when upstream had no
 # projection, or when upstream itself served the row (nothing to compare).
-FIELDS = _V2 + ["bench_proj", "bench_source"]
+_V3 = _V2 + ["bench_proj", "bench_source"]
+
+# v4 (2026-07-20): rows are logged per pitcher as their information completes,
+# not per date. lineup_used says which variable filled opp_k_pct at serve time:
+# "1" = the posted lineup's mean batter K% (information that did not exist when
+# the reference line was set), "0" = team-season fallback, "" = not a kmodel
+# row / predates v4. The record needs this split because it is the testable
+# claim: rows served WITH the lineup should grade better than rows served
+# without it, or the whole later-information mechanism is doing nothing.
+FIELDS = _V3 + ["lineup_used"]
 
 # Last date the mlb-edge upstream served projections. From 2026-07-13 the feed
 # chain could fall through to the owned kmodel (commit 40ab36d), so rows from
@@ -74,7 +83,8 @@ def backfill(rows: list[dict]) -> list[dict]:
     for r in rows:
         if not r.get("mu_source"):
             r["mu_source"] = legacy_source(r.get("date", ""))
-        for c in ("mu_version", "model_p_uncal", "bench_proj", "bench_source"):
+        for c in ("mu_version", "model_p_uncal", "bench_proj", "bench_source",
+                  "lineup_used"):
             r.setdefault(c, "")
     return rows
 

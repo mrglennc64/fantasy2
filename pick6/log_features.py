@@ -80,17 +80,27 @@ def rows_from(date: str, legs: list[dict]) -> list[dict]:
 
 
 def write(date: str, legs: list[dict]) -> str | None:
-    """Write the day's snapshot. Refuses to overwrite — these are frozen
-    pre-game facts, and a later run would rebuild them with post-game data."""
+    """Append players not yet in the day's snapshot; never rewrite one.
+
+    Was refuse-if-file-exists; per-row logging (log_predictions.py, 2026-07-20)
+    made that wrong — rows now log across several cron ticks as lineups post,
+    and only the first tick's features would have been frozen. The guarantee
+    that matters is per ROW and it is kept: a player's feature row is written
+    once, at the moment his prediction logs, and never touched again.
+    """
     p = path_for(date)
+    have: set[str] = set()
     if os.path.exists(p):
-        return None
-    rows = rows_from(date, legs)
+        with open(p, encoding="utf-8") as f:
+            have = {r["player_key"] for r in csv.DictReader(f)}
+    rows = [r for r in rows_from(date, legs) if r["player_key"] not in have]
     if not rows:
         return None
     os.makedirs(DIR, exist_ok=True)
-    with open(p, "w", newline="", encoding="utf-8") as f:
+    new = not os.path.exists(p)
+    with open(p, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")
-        w.writeheader()
+        if new:
+            w.writeheader()
         w.writerows(rows)
     return p

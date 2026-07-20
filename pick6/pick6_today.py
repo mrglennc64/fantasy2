@@ -102,6 +102,7 @@ def compute_board(date: str) -> dict:
         # _kfeat is underscore-prefixed on purpose: write_snapshot() already
         # strips _-keys, so the feature blob stays out of the frozen board JSON
         # without a new exclusion list to keep in sync.
+        det = rec.get("detail") or {}
         legs.append(score_leg({"name": b["name"], "game": b["game"],
                                "line": b["line"], "market": b["market"],
                                "platform": b["platform"], "lam": rec["mu"],
@@ -109,6 +110,12 @@ def compute_board(date: str) -> dict:
                                "mu_version": rec["version"],
                                "bench_proj": rec.get("bench_mu"),
                                "bench_source": rec.get("bench_source", ""),
+                               # which variable filled opp_k_pct (kmodel rows);
+                               # None for upstream sources, which have no
+                               # lineup concept
+                               "lineup_used": (det.get("lineup_used")
+                                               if rec["detail"] else None),
+                               "_game_utc": det.get("game_utc", ""),
                                "_kfeat": rec["detail"]}))
     annotate(legs)  # RotoWire second opinion — displayed, never a filter
     legs.sort(key=lambda l: -l["p"])
